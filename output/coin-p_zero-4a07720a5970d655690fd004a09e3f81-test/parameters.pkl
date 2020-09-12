@@ -1,0 +1,1 @@
+{"material": {"nu": 0.0, "E": 1.0, "gamma": 1.0, "nematic": "e1", "p": "zero"}, "geometry": {"meshsize": 0.1, "rad": 1.0, "rad2": 0.3}, "load": {"f0": 1.0}}
