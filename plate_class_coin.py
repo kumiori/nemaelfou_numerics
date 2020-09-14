@@ -57,7 +57,8 @@ class ActuationTransition(Experiment):
 				"rad2": args.rad2
 			},
 			"load": {
-				"f0": args.f0
+				"f0": args.f0,
+				"s": args.s
 			}
 		}
 		print('Parameters:')
@@ -140,7 +141,7 @@ class ActuationTransition(Experiment):
 			raise NotImplementedError
 
 		x = Expression(['x[0]', 'x[1]', '0.'], degree = 0)
-		self.load = Expression('s', s = 1., degree = 0)
+		self.load = Expression('s', s = self.parameters['load']['s'], degree = 0)
 
 		e1 = Constant([1, 0, 0])
 		e3 = Constant([0, 0, 1])
@@ -237,7 +238,7 @@ import numpy as np
 data = []
 problem = ActuationTransition(template='', name='coin')
 
-problem.load.s = 1.
+# problem.load.s = 1.
 print('Solving s={}'.format(problem.load.s))
 problem.solve()
 data.append(problem.postprocess())
