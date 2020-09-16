@@ -220,13 +220,15 @@ class ActuationTransition(Experiment):
 		energy_ben = assemble(self.energy_ben(self.z)*self.dx)
 		energy_nem = assemble(self.energy_nem(self.z))
 		energy_tot = energy_nem+energy_ben+energy_mem
-		max_abs_v = np.max(np.abs(v.vector()[:]))
+		max_v = np.max((v.vector()[:]))
+		min_v = np.min((v.vector()[:]))
 		# tot_energy.append(assemble(self.work(self.z)))
 		return {'load': self.load.s,
 			'energy_nem': energy_nem,
 			'energy_mem': energy_mem,
 			'energy_ben': energy_ben,
-			'max_abs_v': max_abs_v}
+			'max_v': max_v,
+			'min_v': min_v, }
 
 	def output(self):
 		# import pdb; pdb.set_trace()
