@@ -1,5 +1,5 @@
 import os
-import mshr
+# import mshr
 from dolfin import Measure, DirichletBC, Constant
 from plate_lib import Experiment
 from dolfin import dot, outer, norm, assemble, assemble_system, TestFunction, XDMFFile, TrialFunction, interpolate, Expression, Identity, project
@@ -83,8 +83,8 @@ class ActuationTransition(Experiment):
 			print("Create meshfile, meshsize {}".format(parameters['geometry']['meshsize']))
 			nel = int(parameters['geometry']['rad']/parameters['geometry']['meshsize'])
 
-			geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
-			mesh = mshr.generate_mesh(geom, nel)
+			# geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
+			# mesh = mshr.generate_mesh(geom, nel)
 			mesh_template = open('scripts/coin.geo')
 
 			src = Template(mesh_template.read())
