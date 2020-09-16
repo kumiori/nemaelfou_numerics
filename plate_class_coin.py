@@ -193,6 +193,8 @@ class ActuationTransition(Experiment):
 		print('energy_ben = {}'.format(assemble(self.energy_ben(self.z)*self.dx)))
 		print('energy_nem = {}'.format(assemble(self.energy_nem(self.z))))
 		print('work       = {}'.format(assemble(self.work(self.z))))
+		print('max v      = {}'.format(max(v.vector()[:])))
+		print('min v      = {}'.format(min(v.vector()[:])))
 		# print('work weight= {}'.format(assemble(self.work_weight)))
 		# print('work ratio = {}'.format(assemble(self.work_weight)/assemble(work)))
 		# import pdb; pdb.set_trace()
