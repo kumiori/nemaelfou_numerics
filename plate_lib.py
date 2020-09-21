@@ -89,7 +89,8 @@ class ActuationOverNematicFoundation(object):
 	def a_m(self, u, v):
 		lmbda = self.lmbda
 		mu = self.mu
-		return (inner(self.eps(u), self.eps(v)) + lmbda/(2.*mu)*tr(self.eps(u))*tr(self.eps(v)))
+		clambdamu = (lmbda*mu)/(lmbda+2.*mu)
+		return (inner(self.eps(u), self.eps(v)) + clambdamu*tr(self.eps(u))*tr(self.eps(v)))
 		# *dx
 
 	def b(self, M, v):
@@ -169,17 +170,27 @@ class ActuationOverNematicFoundation(object):
 		M, u, v = split(z) # Functions
 		M_, u_, v_ = self.M_, self.u_, self.v_ # TestFunctions
 		dM, du, dv = self.dM, self.du, self.dv # TrialFunctions
+		Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
+		Q0n = self.Q0n
 
-		f = inner(self.C(u, v), self.C(u_, v_))*dx + ((3.*lmbda+2*mu)/(3.*mu))*v*v_*dx
-		B = - self.a_m(u, u_)*dx  + self.a(M, M_)*dx  - self.b(M_, v) - f - self.b(M, v_)
-		jacobian = - self.a_m(du, u_)*dx  + self.a(dM, M_)*dx \
-			- inner(self.C(du, dv), self.C(u_, v_))*dx \
-			- ((3.*lmbda+2*mu)/(3.*mu))*dv*v_*dx \
-			- self.b(M_, dv) - self.b(dM, v_)
+		# import pdb; pdb.set_trace()
+		F =  self.a(M, M_)*dx  - 3./2.*inner(M, self.eps(u_))*dx - 3./2.*inner(self.eps(u), M_)*dx    \
+			- self.b(M_, v) - self.b(M, v_)                                                     \
+			+ inner(self.C(u, v) - Q0n, self.C(u_, v_))*dx 										\
+			- Clambdamu*v*v_*dx                  												\
+			- self.a_m(u, u_)*dx                                                                \
+
+		F += self.force()*v_*self.dx(2)
+		# self.linear_term(u_, v_)
+
+		# F = B + L
+
+		jacobian = - self.a_m(du, u_)*dx  + self.a(dM, M_)*dx 		\
+			- self.b(M_, dv) - self.b(dM, v_)						\
+			+ inner(self.C(du, dv), self.C(u_, v_))*dx 				\
+			- Clambdamu*dv*v_*dx
 
 		# L = inner(Q0n, C(u_, v_))*dx
-		L = self.linear_term(u_, v_)
-		F = B - L
 
 		self.F = F
 		self.jacobian = jacobian
@@ -220,9 +231,38 @@ class Experiment(object):
 		self.define_variational_formulation(mesh)
 		self.bcs = self.define_boundary_conditions()
 		self.set_model()
+		# self.set_solver()
+
+		form_compiler_parameters = {
+				"representation": "uflacs",
+				"quadrature_degree": 2,
+				"optimize": True,
+				"cpp_optimize": True,
+			}
 		# import pdb; pdb.set_trace()
 
+		self.problem = NonlinearVariationalProblem(self.F, self.z, bcs=self.bcs, J=self.J,
+				form_compiler_parameters=form_compiler_parameters)
+
+		solver = NonlinearVariationalSolver(self.problem)
+
+		# solver_parameterss = {"newton_solver": {"linear_solver": "mumps"}}
+		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
+
+		solver.parameters["nonlinear_solver"] = 'snes'
+		# solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
+		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
+		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
+		solver.parameters["snes_solver"]["linear_solver"] = "mumps"
+		solver.parameters["snes_solver"]["absolute_tolerance"] = 5e-3
+		solver.parameters["snes_solver"]["relative_tolerance"] = 5e-6
+		solver.parameters["snes_solver"]["maximum_iterations"] = 100
+		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = True
+		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
+		# solver.parameters.update(solver_parameterss)
+		self.solver = solver
 		# self.problem = PlateProblem(self.z, self.F, self.J, self.bcs)
+		# self.set_solver()
 
 	def define_variational_formulation(self, mesh):
 		mesh = self.mesh
@@ -244,10 +284,10 @@ class Experiment(object):
 		self.Fr = TensorFunctionSpace(mesh, 'DG', degree = 0, shape= (3,3))
 
 		self.z = Function(V2)
+
 		# M, u, v = split(z)
 		# self.M_, self.u_, self.v_ = TestFunctions(V2)
-		self.solver = self.set_solver()
-	# yields self.b, self.L, self.jacobian
+		# yields self.b, self.L, self.jacobian
 
 	def set_model(self):
 		pass
@@ -346,45 +386,49 @@ class Experiment(object):
 		pass
 
 	def set_solver(self):
-		# snes_options_z = {
-		# 	"snes_type": "newtontr",
-		# 	"snes_stol": 1e-6,
-		# 	"snes_atol": 1e-6,
-		# 	"snes_rtol": 1e-6,
-		# 	"snes_max_it": 1000,
-		# 	"snes_monitor": ''}
+		snes_options_z = {
+			"snes_type": "newtontr",
+			"snes_stol": 1e-2,
+			"snes_atol": 1e-2,
+			"snes_rtol": 1e-2,
+			"snes_max_it": 1000,
+			"snes_monitor": ''}
 
-		# solver = PETScSNESSolver()
-		# snes = solver.snes()
-		# snes.setType(snes_options_z["snes_type"])
-		# # snes.setType("newtontr")
-		# ksp = snes.getKSP()
-		# ksp.setType("preonly")
-		# pc = ksp.getPC()
-		# pc.setType("lu")
-
-
-		# for option, value in snes_options_z.items():
-		# 	print("setting ", option, value)
-		# 	PETScOptions.set(option, value)
-
-		# # solver.parameters.update(snes_solver_parameters)
-		# # info(solver.parameters, True)
-
-		# self.solver = solver
-
-		# F = assemble(self.F, tensor=b)
-		# [bc.apply(b, x) for bc in self.bcs]
-
-		# J = assemble(self.jacobian, tensor=A)
-		# [bc.apply(A) for bc in self.bcs]
-
+		for option, value in snes_options_z.items():
+			print("setting ", option, value)
+			PETScOptions.set(option, value)
 		# import pdb; pdb.set_trace()
-		# return solver
+
+		solver = PETScSNESSolver()
+		snes = solver.snes()
+		snes.setType(snes_options_z["snes_type"])
+		# snes.setMonitor(True)
+		# snes.setType("newtontr")
+		ksp = snes.getKSP()
+		ksp.setType("preonly")
+		pc = ksp.getPC()
+		pc.setType("lu")
+
+		if hasattr(pc, 'setFactorSolverType'):
+			pc.setFactorSolverType("mumps")
+		elif hasattr(pc, 'setFactorSolverPackage'):
+			pc.setFactorSolverPackage('mumps')
+		else:
+			ColorPrint.print_warn('Could not configure preconditioner')
+
+		solver.set_from_options()
+		snes.setFromOptions()
+
+		# solver.parameters.update(snes_solver_parameters)
+		# info(solver.parameters, True)
+
+		self.solver = solver
+
 		pass
 
 	def solve(self):
 		# solver.solve(self.F == 0, self.z, self.bcs, J=self.jacobian)
+
 		snes_solver_parameters = {
 				# "linear_solver": "lu",
 				# "maximum_iterations": 300,
@@ -400,12 +444,15 @@ class Experiment(object):
 					}
 				}
 
+
 		# solve(self.F==0, self.z, self.bcs, J=self.J,
 		# 	solver_parameters={"newton_solver": {"relative_tolerance":1e-5}})
-		solve(self.F==0, self.z, self.bcs, J=self.J,
-			solver_parameters=snes_solver_parameters)
+		# solve(self.F==0, self.z, self.bcs, J=self.J,
+			# solver_parameters=snes_solver_parameters)
 		# solve(self.F==0, self.z, self.bcs, J=self.jacobian)
 		# (it, reason) = self.solver.solve(self.problem, self.z.vector())
 
 
+		# asd
 
+		(it, converged) = self.solver.solve()

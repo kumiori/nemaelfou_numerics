@@ -43,6 +43,7 @@ class ActuationTransition(Experiment):
 
 	def parameters(self, args):
 		self.fname = self.fname + '-p_{}'.format(args.p)
+		# import pdb; pdb.set_trace()
 		parameters = {
 			"material": {
 				"nu": args.nu,
@@ -113,11 +114,11 @@ class ActuationTransition(Experiment):
 		mesh = Mesh("meshes/coin.xml")
 		self.domains = MeshFunction('size_t',mesh,'meshes/coin_physical_region.xml')
 		# dx = dx(subdomain_data=domains)
-		plt.figure()
-		plot(self.domains)
+		# plt.figure()
+		# plot(self.domains)
 		# visuals.setspines0()
-		plt.savefig(os.path.join(self.outdir,'domains-{}.pdf'
-			.format(hashlib.md5(str(d).encode('utf-8')).hexdigest())))
+		# plt.savefig(os.path.join(self.outdir,'domains-{}.pdf'
+			# .format(hashlib.md5(str(d).encode('utf-8')).hexdigest())))
 		self.ds = Measure("exterior_facet", domain = mesh)
 		self.dS = Measure("interior_facet", domain = mesh)
 		self.dx = Measure("dx", metadata=form_compiler_parameters, subdomain_data=self.domains)
@@ -145,7 +146,7 @@ class ActuationTransition(Experiment):
 		e1 = Constant([1, 0, 0])
 		e3 = Constant([0, 0, 1])
 		# import pdb; pdb.set_trace()
-
+		print('Nematic: {}'.format(self.parameters["material"]["nematic"]))
 		if self.parameters["material"]["nematic"] == 'e1':
 			n = e1
 		elif self.parameters["material"]["nematic"] == 'e3':
@@ -181,6 +182,7 @@ class ActuationTransition(Experiment):
 		# return bcs[self.bc_no]
 		# return bcs[2] # homogeneous vertical
 		return bcs[0] # clamped (homog)
+		# return bcs[1] # free
 
 	def postprocess(self):
 		print('z norm: ', self.z.vector().norm('l2'))
