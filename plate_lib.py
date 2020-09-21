@@ -185,7 +185,9 @@ class ActuationOverNematicFoundation(object):
 
 		# F = B + L
 
-		jacobian = - self.a_m(du, u_)*dx  + self.a(dM, M_)*dx 		\
+		jacobian = self.a(dM, M_)*dx 								\
+			- 3./2.*inner(dM, self.eps(u_))*dx - 3./2.*inner(M_, self.eps(du))*dx	\
+			- self.a_m(du, u_)*dx									\
 			- self.b(M_, dv) - self.b(dM, v_)						\
 			+ inner(self.C(du, dv), self.C(u_, v_))*dx 				\
 			- Clambdamu*dv*v_*dx
@@ -250,7 +252,9 @@ class Experiment(object):
 		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
 
 		solver.parameters["nonlinear_solver"] = 'snes'
+		solver.parameters["snes_solver"]["error_on_nonconvergence"] = False
 		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
+		solver.parameters["snes_solver"]["line_search"] = "l2"
 		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
 		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
 		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"
@@ -259,7 +263,8 @@ class Experiment(object):
 		solver.parameters["snes_solver"]["maximum_iterations"] = 100
 		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = True
 		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
-		dolfin.info(solver.parameters["snes_solver"], True)
+
+		info(solver.parameters["snes_solver"], True)
 		# solver.parameters.update(solver_parameterss)
 		self.solver = solver
 		# self.problem = PlateProblem(self.z, self.F, self.J, self.bcs)
@@ -456,4 +461,4 @@ class Experiment(object):
 
 		# asd
 
-		# (it, converged) = self.solver.solve()
+		(it, converged) = self.solver.solve()
