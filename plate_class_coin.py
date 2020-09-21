@@ -57,8 +57,7 @@ class ActuationTransition(Experiment):
 				"rad2": args.rad2
 			},
 			"load": {
-				"f0": args.f0,
-				"s": args.s
+				"f0": args.f0
 			}
 		}
 		print('Parameters:')
@@ -141,7 +140,7 @@ class ActuationTransition(Experiment):
 			raise NotImplementedError
 
 		x = Expression(['x[0]', 'x[1]', '0.'], degree = 0)
-		self.load = Expression('s', s = self.parameters['load']['s'], degree = 0)
+		self.load = Expression('s', s = 1., degree = 0)
 
 		e1 = Constant([1, 0, 0])
 		e3 = Constant([0, 0, 1])
@@ -193,8 +192,6 @@ class ActuationTransition(Experiment):
 		print('energy_ben = {}'.format(assemble(self.energy_ben(self.z)*self.dx)))
 		print('energy_nem = {}'.format(assemble(self.energy_nem(self.z))))
 		print('work       = {}'.format(assemble(self.work(self.z))))
-		print('max v      = {}'.format(max(v.vector()[:])))
-		print('min v      = {}'.format(min(v.vector()[:])))
 		# print('work weight= {}'.format(assemble(self.work_weight)))
 		# print('work ratio = {}'.format(assemble(self.work_weight)/assemble(work)))
 		# import pdb; pdb.set_trace()
@@ -220,15 +217,13 @@ class ActuationTransition(Experiment):
 		energy_ben = assemble(self.energy_ben(self.z)*self.dx)
 		energy_nem = assemble(self.energy_nem(self.z))
 		energy_tot = energy_nem+energy_ben+energy_mem
-		max_v = np.max((v.vector()[:]))
-		min_v = np.min((v.vector()[:]))
+		max_abs_v = np.max(np.abs(v.vector()[:]))
 		# tot_energy.append(assemble(self.work(self.z)))
 		return {'load': self.load.s,
 			'energy_nem': energy_nem,
 			'energy_mem': energy_mem,
 			'energy_ben': energy_ben,
-			'max_v': max_v,
-			'min_v': min_v, }
+			'max_abs_v': max_abs_v}
 
 	def output(self):
 		# import pdb; pdb.set_trace()
@@ -242,7 +237,7 @@ import numpy as np
 data = []
 problem = ActuationTransition(template='', name='coin')
 
-# problem.load.s = 1.
+problem.load.s = 1.
 print('Solving s={}'.format(problem.load.s))
 problem.solve()
 data.append(problem.postprocess())

@@ -18,7 +18,6 @@ import site
 import sys
 
 site.addsitedir('scripts')
-
 import visuals
 
 class ActuationShear(ActuationOverNematicFoundation):

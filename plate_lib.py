@@ -1,7 +1,6 @@
 from __future__ import print_function
 from dolfin import *
 from ufl.operators import And
-# import mshr
 import numpy as np
 import matplotlib.pyplot as plt
 import ufl
