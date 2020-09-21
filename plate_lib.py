@@ -250,15 +250,16 @@ class Experiment(object):
 		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
 
 		solver.parameters["nonlinear_solver"] = 'snes'
-		# solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
+		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
 		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
 		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
-		solver.parameters["snes_solver"]["linear_solver"] = "mumps"
+		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"
 		solver.parameters["snes_solver"]["absolute_tolerance"] = 5e-3
 		solver.parameters["snes_solver"]["relative_tolerance"] = 5e-6
 		solver.parameters["snes_solver"]["maximum_iterations"] = 100
 		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = True
 		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
+		dolfin.info(solver.parameters["snes_solver"], True)
 		# solver.parameters.update(solver_parameterss)
 		self.solver = solver
 		# self.problem = PlateProblem(self.z, self.F, self.J, self.bcs)
@@ -455,4 +456,4 @@ class Experiment(object):
 
 		# asd
 
-		(it, converged) = self.solver.solve()
+		# (it, converged) = self.solver.solve()
