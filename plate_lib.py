@@ -162,21 +162,24 @@ class ActuationOverNematicFoundation(object):
 							 [0,1./3.,1./3.]])
 		self.S = inv(self.A)
 
+
 		dx = self.dx
 		ds = self.ds
 		dS = self.dS
 
 		z = self.z # Function
+		dz = TrialFunction(self.V)
+
 		M, u, v = split(z) # Functions
 		M_, u_, v_ = self.M_, self.u_, self.v_ # TestFunctions
 		dM, du, dv = self.dM, self.du, self.dv # TrialFunctions
 		Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
 		Q0n = self.Q0n
 
-		# import pdb; pdb.set_trace()
-		F =  self.a(M, M_)*dx  - 3./2.*inner(M, self.eps(u_))*dx - 3./2.*inner(self.eps(u), M_)*dx    \
+		F =  self.a(M, M_)*dx  																	\
+			- 3./2.*inner(M, self.eps(u_))*dx - 3./2.*inner(self.eps(u), M_)*dx    				\
 			- self.b(M_, v) - self.b(M, v_)                                                     \
-			+ inner(self.C(u, v) - Q0n, self.C(u_, v_))*dx 										\
+			- inner(self.C(u, v) - Q0n, self.C(u_, v_))*dx 										\
 			- Clambdamu*v*v_*dx                  												\
 			- self.a_m(u, u_)*dx                                                                \
 
@@ -185,17 +188,19 @@ class ActuationOverNematicFoundation(object):
 
 		# F = B + L
 
-		jacobian = self.a(dM, M_)*dx 								\
-			- 3./2.*inner(dM, self.eps(u_))*dx - 3./2.*inner(M_, self.eps(du))*dx	\
-			- self.a_m(du, u_)*dx									\
-			- self.b(M_, dv) - self.b(dM, v_)						\
-			+ inner(self.C(du, dv), self.C(u_, v_))*dx 				\
-			- Clambdamu*dv*v_*dx
+		jacobian2 = self.a(dM, M_)*dx 															\
+			- 3./2.*inner(dM, self.eps(u_))*dx - 3./2.*inner(M_, self.eps(du))*dx				\
+			- self.b(M_, dv) - self.b(dM, v_)													\
+			- inner(self.C(du, dv), self.C(u_, v_))*dx 											\
+			- Clambdamu*dv*v_*dx																\
+			- self.a_m(du, u_)*dx																\
 
+		jacobian = derivative(F, z, dz)
+		import pdb; pdb.set_trace()
 		# L = inner(Q0n, C(u_, v_))*dx
 
 		self.F = F
-		self.jacobian = jacobian
+		self.jacobian = jacobian2
 
 		return F, jacobian
 
@@ -254,7 +259,7 @@ class Experiment(object):
 		solver.parameters["nonlinear_solver"] = 'snes'
 		solver.parameters["snes_solver"]["error_on_nonconvergence"] = False
 		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
-		solver.parameters["snes_solver"]["line_search"] = "l2"
+		# solver.parameters["snes_solver"]["line_search"] = "l2"
 		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
 		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
 		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"

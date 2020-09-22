@@ -145,8 +145,13 @@ class ActuationTransition(Experiment):
 
 		e1 = Constant([1, 0, 0])
 		e3 = Constant([0, 0, 1])
+
+		# self.n = Expression('sin(theta)*_e1 + cos(theta)*_e3',
+				# _e1 = e1, _e3 = e3, theta = 0., degree = 0)
+
+		self.n = Expression(['sin(theta)', 0, 'cos(theta)'], theta=0, degree=0)
 		# import pdb; pdb.set_trace()
-		print('Nematic: {}'.format(self.parameters["material"]["nematic"]))
+		# print('Nematic: {}'.format(self.parameters["material"]["nematic"]))
 		if self.parameters["material"]["nematic"] == 'e1':
 			n = e1
 		elif self.parameters["material"]["nematic"] == 'e3':
@@ -156,7 +161,7 @@ class ActuationTransition(Experiment):
 		else:
 			raise NotImplementedError
 
-		Qn = outer(n, n) - 1./3. * Identity(3)
+		Qn = outer(self.n, self.n) - 1./3. * Identity(3)
 
 		actuation.Q0n = self.load*Qn
 		self.Q0 = actuation.Q0n
@@ -186,6 +191,7 @@ class ActuationTransition(Experiment):
 
 	def postprocess(self):
 		print('z norm: ', self.z.vector().norm('l2'))
+		counter = self.n.theta
 
 		M, u, v = self.z.split(True)
 		Q = project(self.Q0, self.Fr)
@@ -205,14 +211,14 @@ class ActuationTransition(Experiment):
 
 		self.file_mesh << self.mesh
 
-		self.file_out.write(u, self.load.s)
-		self.file_out.write(v, self.load.s)
-		self.file_out.write(M, self.load.s)
-		self.file_out.write(Q, self.load.s)
+		self.file_out.write(u, counter)
+		self.file_out.write(v, counter)
+		self.file_out.write(M, counter)
+		self.file_out.write(Q, counter)
 		# self.file_out.write(Q, self.bc_no)
 
-		self.file_pproc.write_checkpoint(u, 'u', self.load.s, append = True)
-		self.file_pproc.write_checkpoint(v, 'v', self.load.s, append = True)
+		self.file_pproc.write_checkpoint(u, 'u', counter, append = True)
+		self.file_pproc.write_checkpoint(v, 'v', counter, append = True)
 		# self.file_pproc.write_checkpoint(M, 'M', 0, append = True)
 		# self.file_pproc.write_checkpoint(Q, 'Q', 0, append, True)
 		energy_mem = assemble(self.energy_mem(self.z)*self.dx)
@@ -220,12 +226,17 @@ class ActuationTransition(Experiment):
 		energy_nem = assemble(self.energy_nem(self.z))
 		energy_tot = energy_nem+energy_ben+energy_mem
 		max_abs_v = np.max(np.abs(v.vector()[:]))
+		max_v = np.max(v.vector()[:]) 
+		min_v = np.min(v.vector()[:])
 		# tot_energy.append(assemble(self.work(self.z)))
-		return {'load': self.load.s,
+		return {'theta': counter,
 			'energy_nem': energy_nem,
 			'energy_mem': energy_mem,
 			'energy_ben': energy_ben,
-			'max_abs_v': max_abs_v}
+			'max_abs_v': max_abs_v,
+			'max_v': max_v,
+			'min_v': min_v,
+			}
 
 	def output(self):
 		# import pdb; pdb.set_trace()
@@ -240,10 +251,12 @@ data = []
 problem = ActuationTransition(template='', name='coin')
 
 problem.load.s = 1.
-print('Solving s={}'.format(problem.load.s))
-problem.solve()
-data.append(problem.postprocess())
-problem.output()
+for theta in np.linspace(0., 2.*np.pi, 30):
+	problem.n.theta = theta
+	print('Solving theta={}'.format(problem.n.theta))
+	problem.solve()
+	data.append(problem.postprocess())
+	problem.output()
 
 
 evo_data = pd.DataFrame(data)
