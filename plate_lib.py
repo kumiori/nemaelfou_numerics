@@ -346,9 +346,6 @@ class Relaxed(object):
 
 		return eff_density_uv*self.dx
 
-
-
-
 class ActuationOverNematicFoundation(object):
 	"""docstring for PlateOverNematicFoundation"""
 	def __init__(self, z, mesh, parameters, measures):

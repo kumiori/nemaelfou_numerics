@@ -46,7 +46,7 @@ class RelaxedSystem(Experiment):
 									 " p = 'neg': vertical foundation\n")
 
 	def parameters(self, args):
-		self.fname = self.fname + '-p_{}'.format(args.p)
+		# self.fname = self.fname + '-p_{}'.format(args.p)
 		# import pdb; pdb.set_trace()
 		parameters = {
 			"material": {
