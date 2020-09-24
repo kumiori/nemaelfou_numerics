@@ -1,13 +1,14 @@
 import os
 # import mshr
-from dolfin import Measure, DirichletBC, Constant
+from dolfin import Measure, DirichletBC, Constant, File
 from plate_lib import Experiment
 from dolfin import dot, outer, norm, assemble, assemble_system, TestFunction, XDMFFile, TrialFunction, interpolate, Expression, Identity, project
 from dolfin import PETScTAOSolver, PETScSNESSolver, OptimisationProblem, NonlinearProblem, PETScOptions, PETScVector, PETScMatrix, as_backend_type, Vector
-from plate_lib import ActuationOverNematicFoundation, ActuationOverNematicFoundationPneg
+from plate_lib import Relaxed
 from string import Template
 from dolfin import MPI
 from dolfin import Mesh, MeshFunction, plot
+import json
 
 from subprocess import Popen, PIPE, check_output
 import matplotlib.pyplot as plt
@@ -17,13 +18,16 @@ import site
 import sys
 site.addsitedir('scripts')
 import visuals
+import hashlib
+from pathlib import Path
 
-class ActuationTransition(Experiment):
+class RelaxedSystem(Experiment):
 	"""docstring for ActuationTransition"""
-	def __init__(self, s = 1., template='', name=''):
+	def __init__(self, s = 1., template='', name='', p='zero'):
 		# self.s = s
-		# self.case = p
-		super(ActuationTransition, self).__init__(template, name)
+		self.p = p
+		# self.counter=0.
+		super(RelaxedSystem, self).__init__(template, name)
 
 	def add_userargs(self):
 		self.parser.add_argument("--rad", type=float, default=1.)
@@ -50,7 +54,7 @@ class ActuationTransition(Experiment):
 				"E": args.E,
 				"gamma": 1.,
 				"nematic": args.nematic,
-				"p": args.p
+				"p": self.p
 			},
 			"geometry": {
 				"meshsize": args.h,
@@ -58,12 +62,45 @@ class ActuationTransition(Experiment):
 				"rad2": args.rad2
 			},
 			"load": {
-				"f0": args.f0
+				"f0": args.f0,
+				"s": args.s
 			}
 		}
 		print('Parameters:')
 		print(parameters)
 		return parameters
+
+	def create_output(self, fname):
+		args = self.args
+		parameters = self.parameters
+		self.signature = hashlib.md5(str(parameters).encode('utf-8')).hexdigest()
+		print('Signature is: ', self.signature)
+		regime = self.p
+		if args.outdir == None:
+			outdir = "output/{:s}-{}{}".format(fname, self.signature, args.postfix)
+		else:
+			outdir = args.outdir
+
+		self.outdir = outdir
+		Path(outdir).mkdir(parents=True, exist_ok=True)
+		print('Outdir is: ', outdir)
+		print('Output in: ', os.path.join(outdir, fname+'p-'+regime+'.xdmf'))
+		print('P-proc in: ', os.path.join(outdir, fname+'p-'+regime+'_pproc.xdmf'))
+
+		file_results = XDMFFile(os.path.join(outdir, fname+'p-'+regime+'.xdmf'))
+		file_results.parameters["flush_output"] = True
+		file_results.parameters["functions_share_mesh"] = True
+
+		file_pproc = XDMFFile(os.path.join(outdir, fname+'p-'+regime+'_pproc.xdmf'))
+		file_pproc.parameters["flush_output"] = True
+		file_pproc.parameters["functions_share_mesh"] = True
+
+		file_mesh = File(os.path.join(outdir, fname+'p-'+regime+"_mesh.xml"))
+
+		with open(os.path.join(outdir, 'parameters.pkl'), 'w') as f:
+			json.dump(parameters, f)
+		print('DEBUG: pproc file', os.path.join(outdir, fname+'p-'+regime+'_pproc.xdmf'))
+		return file_results, file_pproc, file_mesh
 
 	def create_mesh(self, parameters):
 		from dolfin import Point, XDMFFile
@@ -94,31 +131,15 @@ class ActuationTransition(Experiment):
 				with open("scripts/coin-%s"%self.signature+".geo", 'w') as f:
 					f.write(geofile)
 
-				# cmd = 'gmsh scripts/coin-{}.geo -2 -o meshes/coin-{}.msh'.format(self.signature, self.signature)
-				# print(check_output([cmd], shell=True))  # run in shell mode in case you are not run in terminal
-
-				# cmd = 'dolfin-convert -i gmsh meshes/coin-{}.msh meshes/coin-{}.xml'.format(self.signature, self.signature)
-				# Popen([cmd], stdout=PIPE, shell=True).communicate()
-
-			# mesh_xdmf = XDMFFile("meshes/%s-%s.xdmf"%(fname, self.signature))
-			# mesh_xdmf.write(mesh)
-
 		form_compiler_parameters = {
 			"representation": "uflacs",
 			"quadrature_degree": 2,
 			"optimize": True,
 			"cpp_optimize": True,
 		}
-		# import pdb; pdb.set_trace()
 
 		mesh = Mesh("meshes/coin.xml")
 		self.domains = MeshFunction('size_t',mesh,'meshes/coin_physical_region.xml')
-		# dx = dx(subdomain_data=domains)
-		# plt.figure()
-		# plot(self.domains)
-		# visuals.setspines0()
-		# plt.savefig(os.path.join(self.outdir,'domains-{}.pdf'
-			# .format(hashlib.md5(str(d).encode('utf-8')).hexdigest())))
 		self.ds = Measure("exterior_facet", domain = mesh)
 		self.dS = Measure("interior_facet", domain = mesh)
 		self.dx = Measure("dx", metadata=form_compiler_parameters, subdomain_data=self.domains)
@@ -129,50 +150,26 @@ class ActuationTransition(Experiment):
 
 		measures = [self.dx, self.ds, self.dS]
 		# import pdb; pdb.set_trace()
-		if self.parameters['material']['p'] == 'zero':
-			from plate_lib import ActuationOverNematicFoundation
-			actuation = ActuationOverNematicFoundation(self.z,
-				self.mesh, self.parameters, measures)
-		elif self.parameters['material']['p'] == 'neg':
-			from plate_lib import ActuationOverNematicFoundationPneg
-			actuation = ActuationOverNematicFoundationPneg(self.z,
-				self.mesh, self.parameters, measures)
-		else:
-			raise NotImplementedError
+		# regime = self.parameters['material']['p']
+		regime = self.p
+		print('Regime p={}'.format(regime))
 
-		x = Expression(['x[0]', 'x[1]', '0.'], degree = 0)
-		self.load = Expression('s', s = 1., degree = 0)
+		from plate_lib import Relaxed
+		relaxed = Relaxed(self.z,
+			self.mesh, self.parameters, measures)
 
-		e1 = Constant([1, 0, 0])
-		e3 = Constant([0, 0, 1])
+		relaxed.define_variational_equation()
 
-		# self.n = Expression('sin(theta)*_e1 + cos(theta)*_e3',
-				# _e1 = e1, _e3 = e3, theta = 0., degree = 0)
+		self.emin = relaxed.emin
+		self.emax = relaxed.emax
+		self.phaseField = relaxed.phaseField
 
-		self.n = Expression(['sin(theta)', 0, 'cos(theta)'], theta=0, degree=0)
-		# import pdb; pdb.set_trace()
-		# print('Nematic: {}'.format(self.parameters["material"]["nematic"]))
-		if self.parameters["material"]["nematic"] == 'e1':
-			n = e1
-		elif self.parameters["material"]["nematic"] == 'e3':
-			n = e3
-		elif self.parameters["material"]["nematic"] == 'tilt':
-			n = (e1-e3)/np.sqrt(2)
-		else:
-			raise NotImplementedError
-
-		Qn = outer(self.n, self.n) - 1./3. * Identity(3)
-
-		actuation.Q0n = self.load*Qn
-		self.Q0 = actuation.Q0n
-		actuation.define_variational_equation()
-
-		self.F = actuation.F
-		self.J = actuation.jacobian
-		self.energy_mem = actuation.energy_mem
-		self.energy_ben = actuation.energy_ben
-		self.energy_nem = actuation.energy_nem
-		self.work = actuation.work
+		self.F = relaxed.F
+		self.J = relaxed.jacobian
+		self.energy_mem = relaxed.energy_mem
+		self.energy_ben = relaxed.energy_ben
+		self.energy_nem = relaxed.energy_nem
+		self.work = relaxed.work
 
 	def define_boundary_conditions(self):
 		V = self.z.function_space()
@@ -191,15 +188,66 @@ class ActuationTransition(Experiment):
 
 	def postprocess(self):
 		print('z norm: ', self.z.vector().norm('l2'))
-		counter = self.n.theta
+		# self.counter = self.n.theta
+		counter = self.counter
+		regime = self.p
+		# print('Regime p={}'.format(regime))
+		if regime == 'zero':
+			counter = 0
+		else:
+			counter = 1
 
+		print('pproc counter:{}'.format(counter))
 		M, u, v = self.z.split(True)
-		Q = project(self.Q0, self.Fr)
+		
+		print('u norm = {}'.format(u.vector().norm('l2')))
+		print('u n.h1 = {}'.format(norm(u,'h1')))
+		print('v norm = {}'.format(v.vector().norm('l2')))
+		print('M norm = {}'.format(M.vector().norm('l2')))
+
+		em = self.emin(u, v)
+		eM = self.emax(u, v)
+
+		phase = self.phaseField(em, eM)
+		phv = project(phase, self.L2)
+		plt.clf()
+		plt.colorbar(plot(phv))
+		plt.savefig(os.path.join(self.outdir, 'phases.pdf'))
+
+
+		em = project(em, self.L2)
+		eM = project(eM, self.L2)
+
+		em.rename('em', 'em')
+		eM.rename('eM', 'eM')
+		file_results.write(em, t)
+		file_results.write(eM, t)
+
+		plt.clf()
+		plt.scatter(em.vector()[:], eM.vector()[:])
+		plt.axvline(-1./3.)
+
+		es = np.linspace(0, -1., 3.)
+		plt.plot(es, -2.*es)
+		plt.plot(es, -es/2.)
+		plt.plot(es, -es/2.+1./2.)
+		plt.xlabel('emin')
+		plt.ylabel('emax')
+		plt.savefig(os.path.join(self.outdir, 'phase.pdf'))
+
+		energy_fou = assemble(relaxed.G([u, v]))
+		mem_energy = assemble(1./2.*relaxed.a_m(u, u)*relaxed.dx)
+		ben_energy = assemble(1./2.*relaxed.a(M, M)*relaxed.dx)
+		tot_energy = assemble(1./2.*relaxed.a(M, M)*relaxed.dx 			 					\
+									- relaxed.force()*v*relaxed.dx + relaxed.G([u, v])		\
+									+ 1./2.*relaxed.a_m(u, u)*relaxed.dx)
+
 		# print('z norm: {}'.format(norm(z, 'l2')))
 		print('energy_mem = {}'.format(assemble(self.energy_mem(self.z)*self.dx)))
 		print('energy_ben = {}'.format(assemble(self.energy_ben(self.z)*self.dx)))
-		print('energy_nem = {}'.format(assemble(self.energy_nem(self.z))))
+		print('energy_fou = {}'.format(assemble(relaxed.G([u, v]))))
 		print('work       = {}'.format(assemble(self.work(self.z))))
+		#
 		# print('work weight= {}'.format(assemble(self.work_weight)))
 		# print('work ratio = {}'.format(assemble(self.work_weight)/assemble(work)))
 		# import pdb; pdb.set_trace()
@@ -207,20 +255,17 @@ class ActuationTransition(Experiment):
 		u.rename('u','u')
 		v.rename('v','v')
 		M.rename('M', 'M')
-		Q.rename('Q0', 'Q0')
 
 		self.file_mesh << self.mesh
 
 		self.file_out.write(u, counter)
 		self.file_out.write(v, counter)
 		self.file_out.write(M, counter)
-		self.file_out.write(Q, counter)
 		# self.file_out.write(Q, self.bc_no)
 
 		self.file_pproc.write_checkpoint(u, 'u', counter, append = True)
 		self.file_pproc.write_checkpoint(v, 'v', counter, append = True)
 		# self.file_pproc.write_checkpoint(M, 'M', 0, append = True)
-		# self.file_pproc.write_checkpoint(Q, 'Q', 0, append, True)
 		energy_mem = assemble(self.energy_mem(self.z)*self.dx)
 		energy_ben = assemble(self.energy_ben(self.z)*self.dx)
 		energy_nem = assemble(self.energy_nem(self.z))
@@ -232,11 +277,14 @@ class ActuationTransition(Experiment):
 		# import pdb; pdb.set_trace()
 		# max_u = np.min(u.vector()[:])
 		# tot_energy.append(assemble(self.work(self.z)))
+
+
 		return {'load': counter,
-			'energy_nem': energy_nem,
+			'energy_fou': energy_fou,
 			'energy_mem': energy_mem,
 			'energy_ben': energy_ben,
 			'work': work,
+			'energy_tot': energy_ben+energy_mem+energy_fou-work,
 			'max_abs_v': max_abs_v,
 			# 'max_u': max_u,
 			'max_v': max_v,
@@ -256,19 +304,42 @@ import numpy as np
 
 
 data = []
-problem = ActuationTransition(template='', name='coin')
+problem = RelaxedSystem(template='', name='relaxed', p='zero')
+problem.counter = 0
+problem.solve()
+data.append(problem.postprocess())
+problem.output()
 
-problem.load.s = 1.
-for theta in np.linspace(0., np.pi, 30):
-	problem.n.theta = theta
-	print('Solving theta={}'.format(problem.n.theta))
-	problem.solve()
-	data.append(problem.postprocess())
-	problem.output()
 
 evo_data = pd.DataFrame(data)
 print(evo_data)
 evo_data.to_json(os.path.join(problem.outdir, "time_data.json"))
 
+
+
+list_timings(TimingClear.keep, [TimingType.wall, TimingType.system])
+t = timings(TimingClear.keep,
+            [TimingType.wall, TimingType.user, TimingType.system])
+# Use different MPI reductions
+t_sum = MPI.sum(MPI.comm_world, t)
+t_min = MPI.min(MPI.comm_world, t)
+t_max = MPI.max(MPI.comm_world, t)
+t_avg = MPI.avg(MPI.comm_world, t)
+
+# Print aggregate timings to screen
+print('\n'+t_sum.str(True))
+print('\n'+t_min.str(True))
+print('\n'+t_max.str(True))
+print('\n'+t_avg.str(True))
+
+# Store to XML file on rank 0
+if MPI.rank(MPI.comm_world) == 0:
+    f = File(MPI.comm_self, os.path.join(problem.outdir, "timings_aggregate.xml"))
+    # f << t_sum
+    # f << t_min
+    # f << t_max
+    f << t_avg
+
+dump_timings_to_xml(os.path.join(problem.outdir, "timings_avg_min_max.xml"), TimingClear.clear)
 
 
