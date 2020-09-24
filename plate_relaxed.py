@@ -1,6 +1,6 @@
 import os
 # import mshr
-from dolfin import Measure, DirichletBC, Constant, File
+from dolfin import Measure, DirichletBC, Constant, File, list_timings
 from plate_lib import Experiment
 from dolfin import dot, outer, norm, assemble, assemble_system, TestFunction, XDMFFile, TrialFunction, interpolate, Expression, Identity, project
 from dolfin import PETScTAOSolver, PETScSNESSolver, OptimisationProblem, NonlinearProblem, PETScOptions, PETScVector, PETScMatrix, as_backend_type, Vector
@@ -163,7 +163,7 @@ class RelaxedSystem(Experiment):
 		self.emin = relaxed.emin
 		self.emax = relaxed.emax
 		self.phaseField = relaxed.phaseField
-
+		self.G = relaxed.G
 		self.F = relaxed.F
 		self.J = relaxed.jacobian
 		self.energy_mem = relaxed.energy_mem
@@ -220,14 +220,14 @@ class RelaxedSystem(Experiment):
 
 		em.rename('em', 'em')
 		eM.rename('eM', 'eM')
-		file_results.write(em, t)
-		file_results.write(eM, t)
+		self.file_out.write(em, counter)
+		self.file_out.write(eM, counter)
 
 		plt.clf()
 		plt.scatter(em.vector()[:], eM.vector()[:])
 		plt.axvline(-1./3.)
 
-		es = np.linspace(0, -1., 3.)
+		es = np.linspace(0, -1., 3)
 		plt.plot(es, -2.*es)
 		plt.plot(es, -es/2.)
 		plt.plot(es, -es/2.+1./2.)
@@ -235,19 +235,6 @@ class RelaxedSystem(Experiment):
 		plt.ylabel('emax')
 		plt.savefig(os.path.join(self.outdir, 'phase.pdf'))
 
-		energy_fou = assemble(relaxed.G([u, v]))
-		mem_energy = assemble(1./2.*relaxed.a_m(u, u)*relaxed.dx)
-		ben_energy = assemble(1./2.*relaxed.a(M, M)*relaxed.dx)
-		tot_energy = assemble(1./2.*relaxed.a(M, M)*relaxed.dx 			 					\
-									- relaxed.force()*v*relaxed.dx + relaxed.G([u, v])		\
-									+ 1./2.*relaxed.a_m(u, u)*relaxed.dx)
-
-		# print('z norm: {}'.format(norm(z, 'l2')))
-		print('energy_mem = {}'.format(assemble(self.energy_mem(self.z)*self.dx)))
-		print('energy_ben = {}'.format(assemble(self.energy_ben(self.z)*self.dx)))
-		print('energy_fou = {}'.format(assemble(relaxed.G([u, v]))))
-		print('work       = {}'.format(assemble(self.work(self.z))))
-		#
 		# print('work weight= {}'.format(assemble(self.work_weight)))
 		# print('work ratio = {}'.format(assemble(self.work_weight)/assemble(work)))
 		# import pdb; pdb.set_trace()
@@ -261,11 +248,12 @@ class RelaxedSystem(Experiment):
 		self.file_out.write(u, counter)
 		self.file_out.write(v, counter)
 		self.file_out.write(M, counter)
-		# self.file_out.write(Q, self.bc_no)
 
 		self.file_pproc.write_checkpoint(u, 'u', counter, append = True)
 		self.file_pproc.write_checkpoint(v, 'v', counter, append = True)
 		# self.file_pproc.write_checkpoint(M, 'M', 0, append = True)
+		# import pdb; pdb.set_trace()
+		energy_fou = assemble(self.G([u, v]))
 		energy_mem = assemble(self.energy_mem(self.z)*self.dx)
 		energy_ben = assemble(self.energy_ben(self.z)*self.dx)
 		energy_nem = assemble(self.energy_nem(self.z))
@@ -274,10 +262,13 @@ class RelaxedSystem(Experiment):
 		max_abs_v = np.max(np.abs(v.vector()[:]))
 		max_v = np.max(v.vector()[:]) 
 		min_v = np.min(v.vector()[:])
-		# import pdb; pdb.set_trace()
 		# max_u = np.min(u.vector()[:])
 		# tot_energy.append(assemble(self.work(self.z)))
 
+		print('energy_mem = {}'.format(assemble(self.energy_mem(self.z)*self.dx)))
+		print('energy_ben = {}'.format(assemble(self.energy_ben(self.z)*self.dx)))
+		print('energy_fou = {}'.format(energy_fou))
+		print('work       = {}'.format(assemble(self.work(self.z))))
 
 		return {'load': counter,
 			'energy_fou': energy_fou,
@@ -316,9 +307,10 @@ print(evo_data)
 evo_data.to_json(os.path.join(problem.outdir, "time_data.json"))
 
 
+from dolfin import TimingClear, TimingType
 
 list_timings(TimingClear.keep, [TimingType.wall, TimingType.system])
-t = timings(TimingClear.keep,
+t = list_timings(TimingClear.keep,
             [TimingType.wall, TimingType.user, TimingType.system])
 # Use different MPI reductions
 t_sum = MPI.sum(MPI.comm_world, t)

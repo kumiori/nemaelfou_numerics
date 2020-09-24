@@ -250,8 +250,8 @@ class Relaxed(object):
 	def G(self, U):
 		u = U[0]
 		v = U[1]
-		em = emin(u, v)
-		eM = emax(u, v)
+		em = self.emin(u, v)
+		eM = self.emax(u, v)
 		martEnergy = 3./2.*pow((em+1./3.), 2.) 
 		stiffEnergy = 3./2.*pow((em+1./3.), 2.) + 1./2.*pow((em + 2.*eM-1.), 2.)
 
@@ -260,7 +260,8 @@ class Relaxed(object):
 		isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)), stiffEnergy, 0)
 		isSolid = conditional(isMartensite, martEnergy, isStiff)
 		eff_density = conditional(isLiquid, 0., isSolid)
-		return eff_density*self.dx + lmbda/(2.*mu)*v*v*self.dx
+		_lmbda = project(Constant(self.lmbda), FunctionSpace(self.mesh, 'DG', 0))
+		return eff_density*self.dx + _lmbda/(2.*self.mu)*v*v*self.dx
 
 	def H(self, v):
 		em = v/6.
@@ -279,8 +280,8 @@ class Relaxed(object):
 
 	def phase(self, u, v):
 		# phase of dofs
-		em = emin(u, v)
-		eM = emax(u, v)
+		em = self.emin(u, v)
+		eM = self.emax(u, v)
 		isLiquid = And(And(gt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2))
 		isMartensite = And(And(lt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2+1/2))
 
