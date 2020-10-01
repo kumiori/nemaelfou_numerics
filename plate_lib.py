@@ -11,7 +11,7 @@ from subprocess import Popen, PIPE, check_output
 import os
 from pathlib import Path
 import json
-
+import pdb
 import petsc4py
 import sys
 petsc4py.init(sys.argv)
@@ -45,7 +45,7 @@ class PlateProblem(NonlinearProblem):
 		# import pdb; pdb.set_trace()
 		[bc.apply(A) for bc in self.bcs]
 
-class Relaxed(object):
+class Plate(object):
 	"""docstring for PlateOverNematicFoundation"""
 	def __init__(self, z, mesh, parameters, measures):
 		super(Relaxed, self).__init__()
@@ -201,6 +201,191 @@ class Relaxed(object):
 		self.jacobian = jacobian
 
 		return F, jacobian
+
+	def pm(self, u):
+		Id = Identity(u.geometric_dimension())
+		et =  Expression('t', t=0, degree = 0)
+		return (inner(et*Id, self.eps(u)) + self.lmbda/(2.*self.mu)*tr(et*Id)*tr(self.eps(u)))*dx
+
+class Relaxed(object):
+	"""docstring for PlateOverNematicFoundation"""
+	def __init__(self, z, mesh, parameters, measures):
+		super(Relaxed, self).__init__()
+		self.z = z
+		self.parameters = parameters
+		self.mesh = mesh
+
+		self.dx = measures[0]
+		self.ds = measures[1]
+		self.dS = measures[2]
+
+		self.V = z.function_space()
+		self.M_, self.u_, self.v_ = TestFunctions(self.V)
+		self.dM, self.du, self.dv = TrialFunctions(self.V)
+
+		E = parameters['material']['E']
+		nu = parameters['material']['nu']
+
+		# self.mu = E/(2.0*(1.0 + nu))
+		# self.lmbda = E*nu/(1.0 - nu**2)
+		self.mu = E/(2.0*(1.0 + nu))
+		self.lmbda = E*nu/((1.0 + nu)*(1.0 - 2*nu))
+		self.f0 = parameters['load']['f0']
+		self.regime = parameters['material']['p']
+
+		# self.Q0n = self.Q0n()
+
+	# @staticmethod
+	def eps(self, u):
+		return sym(grad(u))
+
+	def M_to_voigt(self, M):
+		return as_vector([M[0,0],M[1,1],M[1,0]])
+
+	def M_from_voigt(self, m):
+		return as_matrix([[m[0],m[2]],[m[2],m[1]]])
+
+	def a(self, M, tau):
+		Mm = self.M_from_voigt(self.S*self.M_to_voigt(M))
+		return inner(Mm, tau)
+		 # * dx
+
+	# @staticmethod
+	def a_m(self, u, v):
+		lmbda = self.lmbda
+		mu = self.mu
+		clambdamu = (lmbda*mu)/(lmbda+2.*mu)
+		return (inner(self.eps(u), self.eps(v)) + clambdamu*tr(self.eps(u))*tr(self.eps(v)))
+		# *dx
+
+	def b(self, M, v):
+		n = FacetNormal(self.mesh)
+		dx = self.dx
+		ds = self.ds
+		dS = self.dS
+		Mnn = dot(dot(M, n), n)
+		return inner(M, grad(grad(v))) * dx \
+			- Mnn('+') * jump(grad(v), n) * dS \
+			- Mnn * dot(grad(v), n) * ds #\
+
+	@staticmethod
+	def C(u, v):
+		# print('DEBUG: C almost full (lacks 12, 21)')
+		return as_matrix([[-1/3*v,     0.,         1./2.*u[0]],\
+						  [0,          -1./3.*v,   1./2.*u[1]],\
+						  [1./2.*u[0], 1./2.*u[1], 2./3.*v]])
+
+	@staticmethod
+	def M_to_voigt(M):
+		return as_vector([M[0,0],M[1,1],M[1,0]])
+
+	@staticmethod
+	def M_from_voigt(m):
+		return as_matrix([[m[0],m[2]],[m[2],m[1]]])
+
+	def linear_term(self, u_, v_):
+		# _X = VectorFunctionSpace(self.mesh, 'CG', 1, dim=3)
+		# _x = Function(_X)
+		# x = Expression(['x[0]', 'x[1]', '0.'], degree = 0)
+		# import pdb; pdb.set_trace()
+		Q0n = self.Q0n
+		return inner(Q0n, self.C(u_, v_))*self.dx + self.force()*v_*self.dx(2)
+
+	def energy_nem(self, z):
+		M, u, v = split(z)
+		lmbda = self.lmbda
+		mu = self.mu
+		return  1./2.* inner(self.C(u, v), self.C(u, v))*dx + ((3.*lmbda+2*mu)/(3.*mu))*v*v*dx
+
+	def energy_mem(self, z):
+		M, u, v = split(z)
+		# M, u, v = split(self.z)
+
+		return 1./2.* self.a_m(u, u)
+
+	def energy_ben(self, z):
+		# M, u, v = split(self.z)
+		M, u, v = split(z)
+
+		return 1./2.* self.a(M, M)
+
+	def force(self):
+		return Constant(self.f0)
+
+	def work(self, z):
+		# M, u, v = split(self.z)
+		M, u, v = split(z)
+		# Q0n = 1/dot(x, x)**(.5)*outer(x, x) - 1/3*Identity(3)
+		Q0n = self.Q0n
+		force = self.force()
+		# return -inner(Q0n, self.C(u, v))*self.dx - force*v*self.dx
+		return force*v*self.dx(2)
+
+	def define_variational_equation(self):
+		lmbda = self.lmbda
+		mu = self.mu
+		self.A = 1./3.*as_matrix([[lmbda/(lmbda+2*mu)+1,lmbda/(lmbda+2*mu),0], \
+							 [lmbda/(lmbda+2*mu),lmbda/(lmbda+2*mu)+1,1./3.], \
+							 [0,1./3.,1./3.]])
+		self.S = inv(self.A)
+
+
+		dx = self.dx
+		ds = self.ds
+		dS = self.dS
+
+		z = self.z # Function
+		dz = TrialFunction(self.V)
+
+		M, u, v = split(z) # Functions
+		M_, u_, v_ = self.M_, self.u_, self.v_ # TestFunctions
+		dM, du, dv = self.dM, self.du, self.dv # TrialFunctions
+		Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
+		Q0n = self.Q0n
+
+		Fv = self.a(M, M_)*dx						\
+			 - self.a_m(u, u_)*dx 					\
+			 - self.b(M_, v)  - self.b(M, v_)		\
+			 - 1./2.*self.DG_uv([u, v], [u_, v_]) 	\
+			 # + self.force()*v_*self.dx(2) + self.pm(u_)
+
+		# F += self.force()*v_*self.dx + self.pm(u_)
+		Fv += Constant(-1.)*v_*self.dx + self.pm(u_)
+
+		# self.linear_term(u_, v_)
+		# jacobian = derivative(F, z, dz)
+
+		jacobian = self.a(dM, M_)*dx									\
+					- self.a_m(du, u_)*dx 								\
+					- self.b(M_, dv) - self.b(dM, v_) 					\
+					- 1./2.*self.DDG_uv([u, v], [u_, v_], [du, dv])
+
+		lagrangian = self.a(M, M)*dx						\
+					 - self.a_m(u, u)*dx 					\
+					 - self.b(M, v)  - self.b(M, v)		\
+					 - 1./2.*self.DG_uv([u, v], [u, v]) 	\
+					 # + self.force()*v_*self.dx(2) + self.pm(u)
+
+		# F += self.force()*v_*self.dx + self.pm(u_)
+		lagrangian += Constant(-1.)*v*self.dx + self.pm(u)
+
+		self.lagrangian = lagrangian
+
+		self.F = Fv
+		F = assemble(Fv)
+		J = assemble(jacobian)
+		
+		print('100 entries of F')
+
+		print(F[0:100])
+		print('10 entries of J')
+
+		print(J.array()[0:10])
+
+		self.jacobian = jacobian
+		print('J linf: {:.5f}'.format(J.norm('linf')))
+		print('F   l2: {:.5f}'.format(F.norm('l2')))
+		return F, jacobian, lagrangian
 
 	def Q0n(self):
 		# return as_matrix([[0, 0., 0],\
@@ -500,8 +685,8 @@ class ActuationOverNematicFoundation(object):
 			- Clambdamu*dv*v_*dx																\
 			- self.a_m(du, u_)*dx																\
 
-		jacobian = derivative(F, z, dz)
-		# import pdb; pdb.set_trace()
+		# jacobian = derivative(F, z, dz)
+
 		# L = inner(Q0n, C(u_, v_))*dx
 
 		self.F = F
@@ -549,40 +734,11 @@ class Experiment(object):
 		self.set_model()
 		# self.set_solver()
 
-		form_compiler_parameters = {
-				"representation": "uflacs",
-				"quadrature_degree": 2,
-				"optimize": True,
-				"cpp_optimize": True,
-			}
 		# import pdb; pdb.set_trace()
 
-		self.problem = NonlinearVariationalProblem(self.F, self.z, bcs=self.bcs, J=self.J,
-				form_compiler_parameters=form_compiler_parameters)
-
-		solver = NonlinearVariationalSolver(self.problem)
-
-		# solver_parameterss = {"newton_solver": {"linear_solver": "mumps"}}
-		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
-
-		solver.parameters["nonlinear_solver"] = 'snes'
-		solver.parameters["snes_solver"]["error_on_nonconvergence"] = False
-		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
-		# solver.parameters["snes_solver"]["line_search"] = "l2"
-		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
-		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
-		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"
-		solver.parameters["snes_solver"]["absolute_tolerance"] = 5e-3
-		solver.parameters["snes_solver"]["relative_tolerance"] = 5e-6
-		solver.parameters["snes_solver"]["maximum_iterations"] = 100
-		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = True
-		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
-
-		# info(solver.parameters["snes_solver"], True)
-		# solver.parameters.update(solver_parameterss)
-		self.solver = solver
+		self.problem = self.set_problem()
 		# self.problem = PlateProblem(self.z, self.F, self.J, self.bcs)
-		# self.set_solver()
+		self.solver = self.set_solver()
 
 	def define_variational_formulation(self, mesh):
 		mesh = self.mesh
@@ -591,6 +747,7 @@ class Experiment(object):
 		SREG = FiniteElement('HHJ', mesh.ufl_cell(), r)
 		H2 = FiniteElement('CG', mesh.ufl_cell(), r + 1)
 		H1 = VectorElement('CG', mesh.ufl_cell(), 1, dim = 2)
+		# H1scalar = Element('CG', mesh.ufl_cell(), 1)
 
 		self.L2 = FunctionSpace(mesh, 'DG', 0)
 		self.V = FunctionSpace(mesh, SREG * H2)
@@ -600,12 +757,20 @@ class Experiment(object):
 		self.L2 = FunctionSpace(mesh, 'DG', 0)
 
 		self.V1 = FunctionSpace(mesh, H1)
+		# self.V2 = FunctionSpace(mesh, H1scalar)
 		mixed_elem = MixedElement([SREG, H1, H2])
-		V2 = FunctionSpace(mesh, mixed_elem)
+		self.V2 = FunctionSpace(mesh, mixed_elem)
 
+		if self.parameters['experiment']['debug']:
+			M_, u_, v_ = TestFunctions(self.V2)
+			print(assemble(v_*dx)[0:100])
+
+		# import pdb; pdb.set_trace()
+
+		# L2(\O, \R^{3x3})
 		self.Fr = TensorFunctionSpace(mesh, 'DG', degree = 0, shape= (3,3))
 
-		self.z = Function(V2)
+		self.z = Function(self.V2)
 
 		# M, u, v = split(z)
 		# self.M_, self.u_, self.v_ = TestFunctions(V2)
@@ -637,6 +802,7 @@ class Experiment(object):
 		self.parser.add_argument("--postfix", type=str, default='')
 		self.parser.add_argument("--parameters", type=str, default=None)
 		self.parser.add_argument("--f0", type=float, default=.0)
+		self.parser.add_argument("--debug", type=bool, default=False)
 
 		self.add_userargs()
 
@@ -708,45 +874,79 @@ class Experiment(object):
 		pass
 
 	def set_solver(self):
-		snes_options_z = {
-			"snes_type": "newtontr",
-			"snes_stol": 1e-2,
-			"snes_atol": 1e-2,
-			"snes_rtol": 1e-2,
-			"snes_max_it": 1000,
-			"snes_monitor": ''}
+		# snes_options_z = {
+		# 	"snes_type": "newtontr",
+		# 	"snes_stol": 1e-2,
+		# 	"snes_atol": 1e-2,
+		# 	"snes_rtol": 1e-2,
+		# 	"snes_max_it": 1000,
+		# 	"snes_monitor": ''}
 
-		for option, value in snes_options_z.items():
-			print("setting ", option, value)
-			PETScOptions.set(option, value)
-		# import pdb; pdb.set_trace()
+		# for option, value in snes_options_z.items():
+		# 	print("setting ", option, value)
+		# 	PETScOptions.set(option, value)
+		# # import pdb; pdb.set_trace()
 
-		solver = PETScSNESSolver()
-		snes = solver.snes()
-		snes.setType(snes_options_z["snes_type"])
-		# snes.setMonitor(True)
-		# snes.setType("newtontr")
-		ksp = snes.getKSP()
-		ksp.setType("preonly")
-		pc = ksp.getPC()
-		pc.setType("lu")
+		# solver = PETScSNESSolver()
+		# snes = solver.snes()
+		# snes.setType(snes_options_z["snes_type"])
+		# # snes.setMonitor(True)
+		# # snes.setType("newtontr")
+		# ksp = snes.getKSP()
+		# ksp.setType("preonly")
+		# pc = ksp.getPC()
+		# pc.setType("lu")
 
-		if hasattr(pc, 'setFactorSolverType'):
-			pc.setFactorSolverType("mumps")
-		elif hasattr(pc, 'setFactorSolverPackage'):
-			pc.setFactorSolverPackage('mumps')
-		else:
-			ColorPrint.print_warn('Could not configure preconditioner')
+		# if hasattr(pc, 'setFactorSolverType'):
+		# 	pc.setFactorSolverType("mumps")
+		# elif hasattr(pc, 'setFactorSolverPackage'):
+		# 	pc.setFactorSolverPackage('mumps')
+		# else:
+		# 	ColorPrint.print_warn('Could not configure preconditioner')
 
-		solver.set_from_options()
-		snes.setFromOptions()
+		# solver.set_from_options()
+		# snes.setFromOptions()
 
 		# solver.parameters.update(snes_solver_parameters)
 		# info(solver.parameters, True)
 
-		self.solver = solver
+		solver = NonlinearVariationalSolver(self.problem)
 
-		pass
+		# solver_parameterss = {"newton_solver": {"linear_solver": "mumps"}}
+		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
+
+		solver.parameters["nonlinear_solver"] = 'snes'
+		solver.parameters["snes_solver"]["error_on_nonconvergence"] = True
+		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
+		# solver.parameters["snes_solver"]["line_search"] = "l2"
+		# solver.parameters["snes_solver"]["linear_solver"] = "default"
+		# solver.parameters["snes_solver"]["linear_solver"] = "lu"
+		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
+		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
+		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"
+		solver.parameters["snes_solver"]["absolute_tolerance"] = 1e-5
+		solver.parameters["snes_solver"]["relative_tolerance"] = 1e-6
+		solver.parameters["snes_solver"]["solution_tolerance"] = 1e-5
+		solver.parameters["snes_solver"]["maximum_iterations"] = 300
+		solver.parameters["snes_solver"]["method"] = 'newtonls'
+		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = False
+		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
+
+		info(solver.parameters["snes_solver"], True)
+		# solver.parameters.update(solver_parameterss)
+
+		return solver
+
+	def set_problem(self):
+		form_compiler_parameters = {
+			"representation": "uflacs",
+			"quadrature_degree": 2,
+			"optimize": True,
+			"cpp_optimize": True,
+			}
+
+		return NonlinearVariationalProblem(self.F, self.z, bcs=self.bcs, J=self.J,
+				form_compiler_parameters=form_compiler_parameters)
 
 	def solve(self):
 		# solver.solve(self.F == 0, self.z, self.bcs, J=self.jacobian)
@@ -777,4 +977,9 @@ class Experiment(object):
 
 		# asd
 
-		(it, converged) = self.solver.solve()
+		import pdb; pdb.set_trace()
+		# (it, converged) = self.solver.solve()
+		(it, reason) = self.solver.solve(self.problem, self.z.vector())
+
+
+

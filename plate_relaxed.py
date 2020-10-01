@@ -7,10 +7,12 @@ from dolfin import PETScTAOSolver, PETScSNESSolver, OptimisationProblem, Nonline
 from plate_lib import Relaxed
 from string import Template
 from dolfin import MPI
-from dolfin import Mesh, MeshFunction, plot
+from dolfin import Mesh, MeshFunction, plot, info
 import json
-
+import pdb
 from subprocess import Popen, PIPE, check_output
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -21,25 +23,19 @@ import visuals
 import hashlib
 from pathlib import Path
 
-class RelaxedSystem(Experiment):
+class RelaxedExperiment(Experiment):
 	"""docstring for ActuationTransition"""
 	def __init__(self, s = 1., template='', name='', p='zero'):
 		# self.s = s
 		self.p = p
 		# self.counter=0.
-		super(RelaxedSystem, self).__init__(template, name)
+		super(RelaxedExperiment, self).__init__(template, name)
 
 	def add_userargs(self):
 		self.parser.add_argument("--rad", type=float, default=1.)
 		self.parser.add_argument("--rad2", type=float, default=.1)
-		self.parser.add_argument("--s", type=float, default=1.)
 		self.parser.add_argument("--savelag", type=int, default=1)
 		self.parser.add_argument("--print", type=bool, default=False)
-		self.parser.add_argument("--nematic", type=str, default='e1',
-									help="R|Material regime,\n"
-									 " e1\n"
-									 " e3\n"
-									 " tilt: (e1+e3)/sqrt(2)\n")
 		self.parser.add_argument("--p", choices=['zero', 'neg'], type=str, default='zero',
 									help="R|Material regime,\n"
 									 " p = 'zero': coupled model\n"
@@ -53,7 +49,6 @@ class RelaxedSystem(Experiment):
 				"nu": args.nu,
 				"E": args.E,
 				"gamma": 1.,
-				"nematic": args.nematic,
 				"p": self.p
 			},
 			"geometry": {
@@ -62,8 +57,10 @@ class RelaxedSystem(Experiment):
 				"rad2": args.rad2
 			},
 			"load": {
-				"f0": args.f0,
-				"s": args.s
+				"f0": args.f0
+			},
+			"experiment": {
+				"debug": args.debug
 			}
 		}
 		print('Parameters:')
@@ -108,7 +105,9 @@ class RelaxedSystem(Experiment):
 
 		d={'rad': parameters['geometry']['rad'], 'rad2': parameters['geometry']['rad2'],
 			'meshsize': parameters['geometry']['meshsize']}
-		fname = 'circle'
+		# fname = 'coinforall'
+		# fname = 'coin'
+		fname = 'coinforall_small'
 		meshfile = "meshes/%s-%s.xml"%(fname, self.signature)
 
 		if os.path.isfile(meshfile):
@@ -122,14 +121,14 @@ class RelaxedSystem(Experiment):
 
 			# geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
 			# mesh = mshr.generate_mesh(geom, nel)
-			mesh_template = open('scripts/coin.geo')
+			# mesh_template = open('scripts/coin.geo')
 
-			src = Template(mesh_template.read())
-			geofile = src.substitute(d)
+			# src = Template(mesh_template.read())
+			# geofile = src.substitute(d)
 
-			if MPI.rank(MPI.comm_world) == 0:
-				with open("scripts/coin-%s"%self.signature+".geo", 'w') as f:
-					f.write(geofile)
+			# if MPI.rank(MPI.comm_world) == 0:
+			# 	with open("scripts/coin-%s"%self.signature+".geo", 'w') as f:
+			# 		f.write(geofile)
 
 		form_compiler_parameters = {
 			"representation": "uflacs",
@@ -138,12 +137,14 @@ class RelaxedSystem(Experiment):
 			"cpp_optimize": True,
 		}
 
-		mesh = Mesh("meshes/coin.xml")
-		self.domains = MeshFunction('size_t',mesh,'meshes/coin_physical_region.xml')
+		mesh = Mesh("meshes/{}.xml".format(fname))
+		self.domains = MeshFunction('size_t',mesh,'meshes/{}_physical_region.xml'.format(fname))
 		self.ds = Measure("exterior_facet", domain = mesh)
 		self.dS = Measure("interior_facet", domain = mesh)
 		self.dx = Measure("dx", metadata=form_compiler_parameters, subdomain_data=self.domains)
-
+		# self.dx = Measure("dx", subdomain_data=self.domains)
+		plt.colorbar(plot(self.domains))
+		plt.savefig('domains.pdf')
 		return mesh
 
 	def set_model(self):
@@ -155,21 +156,56 @@ class RelaxedSystem(Experiment):
 		print('Regime p={}'.format(regime))
 
 		from plate_lib import Relaxed
+		# pdb.set_trace()
 		relaxed = Relaxed(self.z,
 			self.mesh, self.parameters, measures)
 
+		# pdb.set_trace()
 		relaxed.define_variational_equation()
 
 		self.emin = relaxed.emin
 		self.emax = relaxed.emax
 		self.phaseField = relaxed.phaseField
 		self.G = relaxed.G
+		self.lagrangian = relaxed.lagrangian
 		self.F = relaxed.F
 		self.J = relaxed.jacobian
 		self.energy_mem = relaxed.energy_mem
 		self.energy_ben = relaxed.energy_ben
 		self.energy_nem = relaxed.energy_nem
 		self.work = relaxed.work
+
+	def set_problem(self):
+		from problem import PlateProblemSNES
+		return PlateProblemSNES(self.lagrangian,
+								self.z, self.bcs,
+								residual = self.F, jacobian = self.J)
+
+	def set_solver(self):
+		solver = PETScSNESSolver()
+		snes = solver.snes()
+		snes.setType("newtontr")
+		ksp = snes.getKSP()
+		ksp.setType("preonly")
+		pc = ksp.getPC()
+		pc.setType("lu")
+		snes_solver_parameters = {
+				# "linear_solver": "lu",
+				"linear_solver": "umfpack",
+				# "linear_solver": "mumps",
+				"maximum_iterations": 300,
+				"report": True,
+				# "monitor": True,
+				"line_search": "basic",
+				"method": "newtonls",
+				"absolute_tolerance": 1e-5,
+				"relative_tolerance": 1e-5,
+				"solution_tolerance": 1e-5}
+
+		solver.parameters.update(snes_solver_parameters)
+		info(solver.parameters, True)
+		# import pdb; pdb.set_trace()
+		return solver
 
 	def define_boundary_conditions(self):
 		V = self.z.function_space()
@@ -183,8 +219,8 @@ class RelaxedSystem(Experiment):
 		bcs = [bc_clamped, bc_free, bc_vert, bc_horiz]
 		# return bcs[self.bc_no]
 		# return bcs[2] # homogeneous vertical
-		return bcs[0] # clamped (homog)
-		# return bcs[1] # free
+		# return bcs[0] # clamped (homog)
+		return bcs[1] # free
 
 	def postprocess(self):
 		print('z norm: ', self.z.vector().norm('l2'))
@@ -199,7 +235,7 @@ class RelaxedSystem(Experiment):
 
 		print('pproc counter:{}'.format(counter))
 		M, u, v = self.z.split(True)
-		
+		# pdb.set_trace()
 		print('u norm = {}'.format(u.vector().norm('l2')))
 		print('u n.h1 = {}'.format(norm(u,'h1')))
 		print('v norm = {}'.format(v.vector().norm('l2')))
@@ -295,8 +331,10 @@ import numpy as np
 
 
 data = []
-problem = RelaxedSystem(template='', name='relaxed', p='zero')
+problem = RelaxedExperiment(template='', name='relaxed', p='zero')
 problem.counter = 0
+
+# from problem import PlateProblemSNES
 problem.solve()
 data.append(problem.postprocess())
 problem.output()
@@ -308,30 +346,31 @@ evo_data.to_json(os.path.join(problem.outdir, "time_data.json"))
 
 
 from dolfin import TimingClear, TimingType
+from dolfin import MPI
 
-list_timings(TimingClear.keep, [TimingType.wall, TimingType.system])
-t = list_timings(TimingClear.keep,
-            [TimingType.wall, TimingType.user, TimingType.system])
+# list_timings(TimingClear.keep, [TimingType.wall, TimingType.system])
+# t = list_timings(TimingClear.keep,
+#             [TimingType.wall, TimingType.user, TimingType.system])
 # Use different MPI reductions
-t_sum = MPI.sum(MPI.comm_world, t)
-t_min = MPI.min(MPI.comm_world, t)
-t_max = MPI.max(MPI.comm_world, t)
-t_avg = MPI.avg(MPI.comm_world, t)
+# t_sum = MPI.sum(MPI.comm_world, t[0])
+# t_min = MPI.min(MPI.comm_world, t[1])
+# t_max = MPI.max(MPI.comm_world, t[2])
+# t_avg = MPI.avg(MPI.comm_world, t[3])
 
-# Print aggregate timings to screen
-print('\n'+t_sum.str(True))
-print('\n'+t_min.str(True))
-print('\n'+t_max.str(True))
-print('\n'+t_avg.str(True))
+# # Print aggregate timings to screen
+# print('\n'+t_sum.str(True))
+# print('\n'+t_min.str(True))
+# print('\n'+t_max.str(True))
+# print('\n'+t_avg.str(True))
 
-# Store to XML file on rank 0
-if MPI.rank(MPI.comm_world) == 0:
-    f = File(MPI.comm_self, os.path.join(problem.outdir, "timings_aggregate.xml"))
-    # f << t_sum
-    # f << t_min
-    # f << t_max
-    f << t_avg
+# # Store to XML file on rank 0
+# if MPI.rank(MPI.comm_world) == 0:
+#     f = File(MPI.comm_self, os.path.join(problem.outdir, "timings_aggregate.xml"))
+#     # f << t_sum
+#     # f << t_min
+#     # f << t_max
+#     f << t_avg
 
-dump_timings_to_xml(os.path.join(problem.outdir, "timings_avg_min_max.xml"), TimingClear.clear)
+# dump_timings_to_xml(os.path.join(problem.outdir, "timings_avg_min_max.xml"), TimingClear.clear)
 
 

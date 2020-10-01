@@ -1,6 +1,6 @@
-rad = $rad;
-rad2 = $rad2;
-h = $meshsize;
+rad = .5;
+rad2 = .1;
+h = .05;
 
 Point(0) = { 0, 0, 0, h};
 Point(1) = { rad, 0, 0, h};
