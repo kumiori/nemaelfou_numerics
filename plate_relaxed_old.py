@@ -401,20 +401,21 @@ f0 = args.f0
 
 # without foundation
 
+Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
+
 lagrangian = 1./2.*(a(M, M) - a_m(u, u) - b(M, v))	\
 			 + Constant(f0)*v*dx + pm(u)
 
-residual  = - a_m(u, u_)  + a(M, M_) - b(M_, v)  - b(M, v_)	\
-			 + Constant(f0)*v_*dx + pm(u_)
+residual  = - a_m(u, u_) + a(M, M_) 									\
+			- 3./2.*inner(M, eps(u_))*dx - 3./2.*inner(eps(u), M_)*dx   \
+			- b(M_, v)  - b(M, v_)										\
+			- Clambdamu*v*v_*dx
+			+ Constant(f0)*v_*dx + pm(u_)
 
-jacobian = - a_m(du, u_) + a(dM, M_) 		\
+jacobian = - a_m(du, u_) + a(dM, M_) 									\
+			- 3./2.*inner(dM, eps(u_))*dx - 3./2.*inner(M_, eps(du))*dx	\
 			- b(M_, dv) - b(dM, v_)
-
-problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
-
-
-
-
+			- Clambdamu*dv*v_*dx																\
 
 problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
 
