@@ -383,15 +383,39 @@ print('full problem')
 # p.t = -1.
 et.t = 0.
 f0 = args.f0
-print('elastic length: {}'.format(ell_e))
-lagrangian = 1./2.*(a(M, M) - a_m(u, u) - 1./ell_e**2.*G([u, v])) - b(M, v) + p*v*dx(2) + pm(u)
-residual = - a_m(u, u_)  + a(M, M_)  	\
-			- b(M_, v)  - b(M, v_)  	\
-			- 1./ell_e**2.*DG_uv([u, v], [u_, v_]) \
-			+ Constant(f0)*v_*dx(2) + pm(u_)
+
+
+
+# print('elastic length: {}'.format(ell_e))
+
+# lagrangian = 1./2.*(a(M, M) - a_m(u, u) \
+# 			- Constant(0.)*G([u, v])) 	\
+# 			- b(M, v) + Constant(f0)*v*dx + pm(u)
+# residual = - a_m(u, u_)  + a(M, M_)  	\
+# 			- b(M_, v)  - b(M, v_)  	\
+# 			- Constant(0.)*DG_uv([u, v], [u_, v_]) \
+# 			+ Constant(f0)*v_*dx + pm(u_)
+# jacobian = - a_m(du, u_) + a(dM, M_) 		\
+# 			- b(M_, dv) - b(dM, v_) 		\
+# 			- Constant(0.)*DDG_uv([u, v], [u_, v_], [du, dv])
+
+# without foundation
+
+lagrangian = 1./2.*(a(M, M) - a_m(u, u) - b(M, v))	\
+			 + Constant(f0)*v*dx + pm(u)
+
+residual  = - a_m(u, u_)  + a(M, M_) - b(M_, v)  - b(M, v_)	\
+			 + Constant(f0)*v_*dx + pm(u_)
+
 jacobian = - a_m(du, u_) + a(dM, M_) 		\
-			- b(M_, dv) - b(dM, v_) 		\
-			- 1./ell_e**2.*DDG_uv([u, v], [u_, v_], [du, dv])
+			- b(M_, dv) - b(dM, v_)
+
+problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
+
+
+
+
+
 problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
 
 F = assemble(residual)
