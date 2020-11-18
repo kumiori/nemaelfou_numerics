@@ -70,7 +70,6 @@ def set_solver():
 			# "linear_solver": "mumps",
 			"maximum_iterations": 300,
 			"report": True,
-			# "monitor": True,
 			"line_search": "basic",
 			"method": "newtonls",
 			"absolute_tolerance": 1e-3,
@@ -82,7 +81,7 @@ def set_solver():
 	# import pdb; pdb.set_trace()
 	return solver
 
-outdir = 'output'
+outdir = 'output/relax'
 file_results = XDMFFile(os.path.join(outdir, "coin_relax.xdmf"))
 file_results.parameters["flush_output"] = True
 file_results.parameters["functions_share_mesh"] = True
@@ -132,8 +131,11 @@ mesh = Mesh("meshes/{}.xml".format(fname))
 domains = MeshFunction('size_t',mesh,'meshes/{}_physical_region.xml'.format(fname))
 dx = Measure("dx", metadata=form_compiler_parameters, subdomain_data=domains)
 # dx = Measure("dx", subdomain_data=domains)
-
+plt.figure()
+plt.colorbar(dolfin.plot(domains))
 # iterative_solver = False
+plt.savefig('domains.pdf')
+
 
 r = 2
 SREG = FiniteElement('HHJ', mesh.ufl_cell(), r)
@@ -147,7 +149,7 @@ V1 = FunctionSpace(mesh, H1)
 mixed_elem = MixedElement([SREG, H1, H2])
 V2 = FunctionSpace(mesh, mixed_elem)
 
-p = Expression('-t', t=0, degree=0)
+pressure = Expression('t', t=0, degree=0)
 K = Constant(1.)
 ell_e = args.ell_e
 A = 1./3.*as_matrix([[lmbda/(lmbda+2*mu)+1,lmbda/(lmbda+2*mu),0], \
@@ -165,9 +167,6 @@ M, u, v = split(z)
 M_, u_, v_ = TestFunctions(V2)
 
 # print(assemble(v_*dx)[0:100])
-# import pdb; pdb.set_trace()
-
-
 
 (dM, du, dv) = TrialFunctions(V2)
 
@@ -242,7 +241,7 @@ def G(U):
 	isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)), stiffEnergy, 0)
 	isSolid = conditional(isMartensite, martEnergy, isStiff)
 	eff_density = conditional(isLiquid, 0., isSolid)
-	return eff_density*dx + (3*lmbda+2*mu)/(6.*mu)*v*v*dx
+	return eff_density*dx
 
 def H(v):
 	em = v/6.
@@ -296,7 +295,7 @@ def DG_uv(U, V):
 		stiffEnergy_u + stiffEnergy_v, 0)
 	isSolid = conditional(isMartensite, martEnergy_u + martEnergy_v, isStiff)
 	eff_density_uv = conditional(isLiquid, 0., isSolid)
-	return eff_density_uv*dx + (3*lmbda+2*mu)/(3.*mu)*v*v_*dx
+	return eff_density_uv*dx
 
 def DDG_uv(U, V, dV):
 	u = U[0]
@@ -323,16 +322,21 @@ def DDG_uv(U, V, dV):
 		stiffEnergy_uu + stiffEnergy_vv, 0)
 	isSolid = conditional(isMartensite, martEnergy_uu + martEnergy_vv, isStiff)
 	eff_density_uv = conditional(isLiquid, 0., isSolid)
-	return eff_density_uv*dx + (3*lmbda+2*mu)/(6.*mu)*dv*v_*dx
+	return eff_density_uv*dx
 
-def postprocess(z, t):
+def postprocess(z, t, it=0):
 	M, u, v = z.split(True)
+	if t<0:
+		counter = it
+	else:
+		counter = t
 
 	print('u norm = {}'.format(u.vector().norm('l2')))
 	print('u n.h1 = {}'.format(norm(u,'h1')))
 	print('v norm = {}'.format(v.vector().norm('l2')))
 	print('v max, min = {}/{}'.format(np.max(v.vector()[:]), np.min(v.vector()[:])))
 	print('M norm = {}'.format(M.vector().norm('l2')))
+	print('processing timestep {}'.format(counter))
 
 	em = emin(u, v)
 	eM = emax(u, v)
@@ -341,24 +345,31 @@ def postprocess(z, t):
 	phv = project(phase, L2)
 	plt.clf()
 	plt.colorbar(plot(phv))
-	plt.savefig('phases.pdf')
-
-	u.rename('u','u')
-	v.rename('v','v')
-	M.rename('M', 'M')
-	file_results.write(u, t)
-	file_results.write(v, t)
-	file_results.write(M, t)
+	plt.savefig('phases-{}.pdf'.format(counter))
 
 
 	em = project(em, L2)
 	eM = project(eM, L2)
-	# import pdb; pdb.set_trace()
+
+	u.rename('u','u')
+	v.rename('v','v')
+	M.rename('M', 'M')
 
 	em.rename('em', 'em')
 	eM.rename('eM', 'eM')
-	file_results.write(em, t)
-	file_results.write(eM, t)
+	phv.rename('phase', 'phase')
+
+	# import pdb; pdb.set_trace()
+
+
+
+	file_results.write(u, counter)
+	file_results.write(v, counter)
+	file_results.write(M, counter)
+	file_results.write(phv, counter)
+	file_results.write(em, counter)
+	file_results.write(eM, counter)
+	print('DEBUG: written file_results, timestep {}'.format(counter))
 
 	plt.clf()
 	plt.scatter(em.vector()[:], eM.vector()[:])
@@ -369,87 +380,111 @@ def postprocess(z, t):
 	plt.plot(es, -es/2.+1./2.)
 	plt.xlabel('emin')
 	plt.ylabel('emax')
-	plt.savefig('phase.pdf')
+	plt.savefig('phase-{}.pdf'.format(counter))
 
-	fou_energy.append(assemble(G([u, v])))
-	mem_energy.append(assemble(1./2.*a_m(u, u)))
-	ben_energy.append(assemble(1./2.*a(M, M)))
-	tot_energy.append(assemble(1./2.*a(M, M)- p*v*dx + 1./2.*	G([u, v]) + 1./2.*a_m(u, u)))
+	fou_energy = assemble(G([u, v])+Clambdamu*v*v*dx)
+	mem_energy = assemble(1./2.*a_m(u, u)-3./4.*inner(eps(u), M)*dx)
+	ben_energy = assemble(1./2.*a(M, M)-3./4.*inner(eps(u), M)*dx)
+	tot_energy = assemble(1./2.*a(M, M)- pressure*v*dx + 1./2.*G([u, v]) + 1./2.*a_m(u, u))
+	tot_energy = mem_energy+ben_energy+fou_energy
 
 
 	return {'fou_energy': fou_energy, 'mem_energy': mem_energy, 'ben_energy': ben_energy, 'tot_energy': tot_energy}
 
 print('full problem')
 # p.t = -1.
-et.t = 0.
+# et.t = 0.
 f0 = args.f0
+Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
 
 
 
 # print('elastic length: {}'.format(ell_e))
 
-# lagrangian = 1./2.*(a(M, M) - a_m(u, u) \
-# 			- Constant(0.)*G([u, v])) 	\
-# 			- b(M, v) + Constant(f0)*v*dx + pm(u)
-# residual = - a_m(u, u_)  + a(M, M_)  	\
-# 			- b(M_, v)  - b(M, v_)  	\
-# 			- Constant(0.)*DG_uv([u, v], [u_, v_]) \
-# 			+ Constant(f0)*v_*dx + pm(u_)
-# jacobian = - a_m(du, u_) + a(dM, M_) 		\
-# 			- b(M_, dv) - b(dM, v_) 		\
-# 			- Constant(0.)*DDG_uv([u, v], [u_, v_], [du, dv])
-
-# without foundation
-
-Clambdamu = (3.*lmbda+2*mu)/(6.*mu)
-
-lagrangian = 1./2.*(a(M, M) - a_m(u, u) - b(M, v))	\
-			 + Constant(f0)*v*dx + pm(u)
-
+lagrangian = 1./2.*(a(M, M) - a_m(u, u) \
+			- Constant(0.)*G([u, v])) 	\
+			- b(M, v) + pressure*v*dx + pm(u)
 residual  = - a_m(u, u_) + a(M, M_) 									\
 			- 3./2.*inner(M, eps(u_))*dx - 3./2.*inner(eps(u), M_)*dx   \
 			- b(M_, v)  - b(M, v_)										\
-			- Clambdamu*v*v_*dx
-			+ Constant(f0)*v_*dx + pm(u_)
+			- Clambdamu*v*v_*dx											\
+			- Constant(1/ell_e**2.)*DG_uv([u, v], [u_, v_]) 			\
+			+ pressure*v_*dx + pm(u_)
 
-jacobian = - a_m(du, u_) + a(dM, M_) 									\
+jacobian = - a_m(du, u_) + a(dM, M_) 		\
 			- 3./2.*inner(dM, eps(u_))*dx - 3./2.*inner(M_, eps(du))*dx	\
-			- b(M_, dv) - b(dM, v_)
-			- Clambdamu*dv*v_*dx																\
+			- b(M_, dv) - b(dM, v_)										\
+			- Constant(1/ell_e**2.)*DDG_uv([u, v], [u_, v_], [du, dv])	\
+			- Clambdamu*dv*v_*dx
 
-problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
-
-F = assemble(residual)
-J = assemble(jacobian)
-
-print('J linf: {:.5f}'.format(J.norm('linf')))
-print('F   l2: {:.5f}'.format(F.norm('l2')))
-
-solver  = set_solver()
+# without foundation
 
 
-(it, conv) = solver.solve(problem, z.vector())
-M, u, v = z.split(True)
+# lagrangian = 1./2.*(a(M, M) - a_m(u, u) - b(M, v))	\
+# 			 + pressure*v*dx + pm(u)
 
-plt.clf()
-plt.colorbar(plot(u, mode='displacement'))
-plt.savefig('full-u.pdf')
+# residual  = - a_m(u, u_) + a(M, M_) 									\
+# 			- 3./2.*inner(M, eps(u_))*dx - 3./2.*inner(eps(u), M_)*dx   \
+# 			- b(M_, v)  - b(M, v_)										\
+# 			- Clambdamu*v*v_*dx											\
+# 			+ pressure*v_*dx + pm(u_)
 
-plt.clf()
-plt.colorbar(plot(v))
-plt.savefig('full-v.pdf')
+# jacobian = - a_m(du, u_) + a(dM, M_) 									\
+# 			- 3./2.*inner(dM, eps(u_))*dx - 3./2.*inner(M_, eps(du))*dx	\
+# 			- b(M_, dv) - b(dM, v_)										\
+# 			- Clambdamu*dv*v_*dx																\
 
-tot_energy = []
-fou_energy = []
-mem_energy = []
-ben_energy = []
-fou_energy = []
+# solver  = set_solver()
+# pressure.t = args.f0
+# problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
+# (it, conv) = solver.solve(problem, z.vector())
+# import pdb; pdb.set_trace()
+
+
 
 import pandas as pd
 
-data = postprocess(z, 0)
-dataf = pd.DataFrame(data)
+time_data = []
+
+for (step, t) in enumerate(np.linspace(0., args.f0, 10)):
+	print(t, step)
+	pressure.t = t
+	print('')
+	print('')
+	print('Solving problem with p={:.3f}'.format(t))
+	print('')
+	problem = PlateProblemSNES(lagrangian, z, bc_clamped, residual = residual, jacobian = jacobian)
+
+	F = assemble(residual)
+	J = assemble(jacobian)
+
+	print('J linf: {:.5f}'.format(J.norm('linf')))
+	print('F   l2: {:.5f}'.format(F.norm('l2')))
+
+	solver  = set_solver()
+
+	# z = Function(V2)
+	(it, conv) = solver.solve(problem, z.vector())
+	print('DEBUG: converged reason: {}'.format(conv))
+
+	data = postprocess(z, t=t, it=step)
+	# dataf = pd.DataFrame(data)
+	time_data.append(data)
+
+# print(time_data)
+dataf = pd.DataFrame(time_data)
 print(dataf)
 dataf.to_json(os.path.join(outdir, "time_data.json"))
+
+# M, u, v = z.split(True)
+
+# plt.clf()
+# plt.colorbar(plot(u, mode='displacement'))
+# plt.savefig('full-u.pdf')
+
+# plt.clf()
+# plt.colorbar(plot(v))
+# plt.savefig('full-v.pdf')
+
 
 
