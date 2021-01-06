@@ -68,9 +68,8 @@ class Plate(object):
 		# self.lmbda = E*nu/(1.0 - nu**2)
 		self.mu = E/(2.0*(1.0 + nu))
 		self.lmbda = E*nu/((1.0 + nu)*(1.0 - 2*nu))
-		self.f0 = parameters['load']['f0']
+		self.f0 = parameters['loading']['f0']
 		self.regime = parameters['material']['p']
-
 		# self.Q0n = self.Q0n()
 
 	# @staticmethod
@@ -230,7 +229,7 @@ class Relaxed(object):
 		# self.lmbda = E*nu/(1.0 - nu**2)
 		self.mu = E/(2.0*(1.0 + nu))
 		self.lmbda = E*nu/((1.0 + nu)*(1.0 - 2*nu))
-		self.f0 = parameters['load']['f0']
+		self.f0 = parameters['loading']['f0']
 		self.regime = parameters['material']['p']
 
 		# self.Q0n = self.Q0n()
@@ -329,7 +328,6 @@ class Relaxed(object):
 							 [0,1./3.,1./3.]])
 		self.S = inv(self.A)
 
-
 		dx = self.dx
 		ds = self.ds
 		dS = self.dS
@@ -374,13 +372,13 @@ class Relaxed(object):
 		self.F = Fv
 		F = assemble(Fv)
 		J = assemble(jacobian)
-		
-		print('100 entries of F')
 
-		print(F[0:100])
-		print('10 entries of J')
+		# print('100 entries of F')
 
-		print(J.array()[0:10])
+		# print(F[0:100])
+		# print('10 entries of J')
+
+		# print(J.array()[0:10])
 
 		self.jacobian = jacobian
 		print('J linf: {:.5f}'.format(J.norm('linf')))
@@ -448,20 +446,20 @@ class Relaxed(object):
 		_lmbda = project(Constant(self.lmbda), FunctionSpace(self.mesh, 'DG', 0))
 		return eff_density*self.dx + _lmbda/(2.*self.mu)*v*v*self.dx
 
-	def H(self, v):
-		em = v/6.
-		eM = conditional(gt(-v, 0), -v/3., + v/6.)
+	# def H(self, v):
+	# 	em = v/6.
+	# 	eM = conditional(gt(-v, 0), -v/3., + v/6.)
 
-		martEnergy = 3./2.*pow((em-1./3.), 2.)
-		stiffEnergy = 3./2.*pow((em-1./3.), 2.) + 1./2.*pow((em + 2.*eM-1.), 2.)
+	# 	martEnergy = 3./2.*pow((em-1./3.), 2.)
+	# 	stiffEnergy = 3./2.*pow((em-1./3.), 2.) + 1./2.*pow((em + 2.*eM-1.), 2.)
 
-		isLiquid = And(And(gt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2))
-		isMartensite = And(And(lt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2+1/2))
+	# 	isLiquid = And(And(gt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2))
+	# 	isMartensite = And(And(lt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2+1/2))
 
-		isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)), stiffEnergy, 0)
-		isSolid = conditional(isMartensite, martEnergy, isStiff)
-		eff_density = conditional(isLiquid, 0., isSolid)
-		return eff_density*self.dx + lmbda/(2.*mu)*v*v*self.dx
+	# 	isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)), stiffEnergy, 0)
+	# 	isSolid = conditional(isMartensite, martEnergy, isStiff)
+	# 	eff_density = conditional(isLiquid, 0., isSolid)
+	# 	return eff_density*self.dx + lmbda/(2.*mu)*v*v*self.dx
 
 	def phase(self, u, v):
 		# phase of dofs
@@ -554,7 +552,7 @@ class ActuationOverNematicFoundation(object):
 		# self.lmbda = E*nu/(1.0 - nu**2)
 		self.mu = E/(2.0*(1.0 + nu))
 		self.lmbda = E*nu/((1.0 + nu)*(1.0 - 2*nu))
-		self.f0 = parameters['load']['f0']
+		self.f0 = parameters['loading']['f0']
 
 		# self.Q0n = self.Q0n()
 
@@ -678,7 +676,7 @@ class ActuationOverNematicFoundation(object):
 
 		# F = B + L
 
-		jacobian2 = self.a(dM, M_)*dx 															\
+		jacobian = self.a(dM, M_)*dx 															\
 			- 3./2.*inner(dM, self.eps(u_))*dx - 3./2.*inner(M_, self.eps(du))*dx				\
 			- self.b(M_, dv) - self.b(dM, v_)													\
 			- inner(self.C(du, dv), self.C(u_, v_))*dx 											\
@@ -690,7 +688,7 @@ class ActuationOverNematicFoundation(object):
 		# L = inner(Q0n, C(u_, v_))*dx
 
 		self.F = F
-		self.jacobian = jacobian2
+		self.jacobian = jacobian
 
 		return F, jacobian
 
@@ -718,7 +716,7 @@ class ActuationOverNematicFoundationPneg(ActuationOverNematicFoundation):
 
 class Experiment(object):
 	"""docstring for Experiment"""
-	def __init__(self, template='', name=''):
+	def __init__(self, template='', name='', parameters = {}):
 		super(Experiment, self).__init__()
 		self.template = template
 		self.fname = name
@@ -761,9 +759,9 @@ class Experiment(object):
 		mixed_elem = MixedElement([SREG, H1, H2])
 		self.V2 = FunctionSpace(mesh, mixed_elem)
 
-		if self.parameters['experiment']['debug']:
-			M_, u_, v_ = TestFunctions(self.V2)
-			print(assemble(v_*dx)[0:100])
+		# if self.parameters['experiment']['debug']:
+		# 	M_, u_, v_ = TestFunctions(self.V2)
+		# 	print(assemble(v_*dx)[0:100])
 
 		# import pdb; pdb.set_trace()
 
@@ -826,7 +824,7 @@ class Experiment(object):
 			"geometry": {
 				"meshsize": args.h
 			},
-			"load": {
+			"loading": {
 				"f0": args.f0
 			}
 		}
@@ -885,7 +883,6 @@ class Experiment(object):
 		# for option, value in snes_options_z.items():
 		# 	print("setting ", option, value)
 		# 	PETScOptions.set(option, value)
-		# # import pdb; pdb.set_trace()
 
 		# solver = PETScSNESSolver()
 		# snes = solver.snes()
@@ -912,24 +909,26 @@ class Experiment(object):
 
 		solver = NonlinearVariationalSolver(self.problem)
 
+		import pdb; pdb.set_trace()
+
 		# solver_parameterss = {"newton_solver": {"linear_solver": "mumps"}}
 		# solver.parameters["newton_solver"]["linear_solver"] = "mumps"
 
 		solver.parameters["nonlinear_solver"] = 'snes'
 		solver.parameters["snes_solver"]["error_on_nonconvergence"] = True
-		solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
+		# solver.parameters["snes_solver"]["linear_solver"] = "umfpack"
 		# solver.parameters["snes_solver"]["line_search"] = "l2"
 		# solver.parameters["snes_solver"]["linear_solver"] = "default"
 		# solver.parameters["snes_solver"]["linear_solver"] = "lu"
 		# solver.parameters["snes_solver"]["linear_solver"] = "superlu"
 		# solver.parameters["snes_solver"]["linear_solver"] = "petsc"
-		# solver.parameters["snes_solver"]["linear_solver"] = "mumps"
-		solver.parameters["snes_solver"]["absolute_tolerance"] = 1e-5
-		solver.parameters["snes_solver"]["relative_tolerance"] = 1e-6
-		solver.parameters["snes_solver"]["solution_tolerance"] = 1e-5
+		solver.parameters["snes_solver"]["linear_solver"] = "mumps"
+		solver.parameters["snes_solver"]["absolute_tolerance"] = 1e-4
+		solver.parameters["snes_solver"]["relative_tolerance"] = 1e-3
+		solver.parameters["snes_solver"]["solution_tolerance"] = 1e-3
 		solver.parameters["snes_solver"]["maximum_iterations"] = 300
 		solver.parameters["snes_solver"]["method"] = 'newtonls'
-		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = False
+		solver.parameters["snes_solver"]["lu_solver"]["symmetric"] = True
 		solver.parameters["snes_solver"]["lu_solver"]["verbose"] = True
 
 		info(solver.parameters["snes_solver"], True)
@@ -961,8 +960,8 @@ class Experiment(object):
 				# "method": "newtonls",
 				"newton_solver": {
 					"linear_solver": "mumps",
-					"absolute_tolerance": 1e-6,
-					"relative_tolerance": 1e-5
+					"absolute_tolerance": 1e-4,
+					"relative_tolerance": 1e-3
 					}
 				}
 
@@ -977,8 +976,10 @@ class Experiment(object):
 
 		# asd
 
-		import pdb; pdb.set_trace()
+		# import pdb; pdb.set_trace()
 		# (it, converged) = self.solver.solve()
+
+		# relaxed experiment
 		(it, reason) = self.solver.solve(self.problem, self.z.vector())
 
 

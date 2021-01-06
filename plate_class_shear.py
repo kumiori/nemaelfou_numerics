@@ -81,7 +81,10 @@ class Actuation(Experiment):
 				"meshsize": args.h,
 				"rad": args.rad,
 				"T": np.sqrt(_tc/_ta)
-			}
+			},
+			"load": {
+				"f0": args.f0
+				}
 		}
 		print('Parameters:')
 		print(parameters)

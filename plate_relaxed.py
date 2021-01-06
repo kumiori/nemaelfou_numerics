@@ -25,11 +25,11 @@ from pathlib import Path
 
 class RelaxedExperiment(Experiment):
 	"""docstring for ActuationTransition"""
-	def __init__(self, s = 1., template='', name='', p='zero'):
+	def __init__(self, s = 1., template='', name='', p='zero', parameters = {}):
 		# self.s = s
 		self.p = p
 		# self.counter=0.
-		super(RelaxedExperiment, self).__init__(template, name)
+		super(RelaxedExperiment, self).__init__(template, name, parameters)
 
 	def add_userargs(self):
 		self.parser.add_argument("--rad", type=float, default=1.)
@@ -44,25 +44,29 @@ class RelaxedExperiment(Experiment):
 	def parameters(self, args):
 		# self.fname = self.fname + '-p_{}'.format(args.p)
 		# import pdb; pdb.set_trace()
-		parameters = {
-			"material": {
-				"nu": args.nu,
-				"E": args.E,
-				"gamma": 1.,
-				"p": self.p
-			},
-			"geometry": {
-				"meshsize": args.h,
-				"rad": args.rad,
-				"rad2": args.rad2
-			},
-			"load": {
-				"f0": args.f0
-			},
-			"experiment": {
-				"debug": args.debug
-			}
-		}
+		# parameters = {
+		# 	"material": {
+		# 		"nu": args.nu,
+		# 		"E": args.E,
+		# 		"gamma": 1.,
+		# 		"p": self.p
+		# 	},
+		# 	"geometry": {
+		# 		"meshsize": args.h,
+		# 		"rad": args.rad,
+		# 		"rad2": args.rad2
+		# 	},
+		# 	"load": {
+		# 		"f0": args.f0
+		# 	},
+		# 	"experiment": {
+		# 		"debug": args.debug
+		# 	}
+		# }
+
+		with open('parameters/parameters.yaml') as f:
+		    parameters = yaml.load(f, Loader=yaml.FullLoader)
+
 		print('Parameters:')
 		print(parameters)
 		return parameters
@@ -103,32 +107,29 @@ class RelaxedExperiment(Experiment):
 		from dolfin import Point, XDMFFile
 		import hashlib 
 
-		d={'rad': parameters['geometry']['rad'], 'rad2': parameters['geometry']['rad2'],
-			'meshsize': parameters['geometry']['meshsize']}
+		d={'rad': parameters['geometry']['rad'], 'h': parameters['geometry']['meshsize']}
 		# fname = 'coinforall'
 		# fname = 'coin'
 		fname = 'coinforall_small'
 		meshfile = "meshes/%s-%s.xml"%(fname, self.signature)
 
 		if os.path.isfile(meshfile):
-			# already existing mesh
 			print("Meshfile %s exists"%meshfile)
 
 		else:
-			# mesh_template = open('scripts/sandwich_pert.template.geo' )
 			print("Create meshfile, meshsize {}".format(parameters['geometry']['meshsize']))
 			nel = int(parameters['geometry']['rad']/parameters['geometry']['meshsize'])
 
 			# geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
 			# mesh = mshr.generate_mesh(geom, nel)
-			# mesh_template = open('scripts/coin.geo')
+			mesh_template = open('scripts/coin_template.geo')
 
-			# src = Template(mesh_template.read())
-			# geofile = src.substitute(d)
+			src = Template(mesh_template.read())
+			geofile = src.substitute(d)
 
-			# if MPI.rank(MPI.comm_world) == 0:
-			# 	with open("scripts/coin-%s"%self.signature+".geo", 'w') as f:
-			# 		f.write(geofile)
+			if MPI.rank(MPI.comm_world) == 0:
+				with open("scripts/coin-%s"%self.signature+".geo", 'w') as f:
+					f.write(geofile)
 
 		form_compiler_parameters = {
 			"representation": "uflacs",
@@ -328,10 +329,13 @@ class RelaxedExperiment(Experiment):
 bcs = ['bc_clamped', 'bc_free', 'bc_vert', 'bc_horiz']
 
 import numpy as np
+import yaml
 
+with open('parameters/parameters.yaml') as f:
+    parameters = yaml.load(f, Loader=yaml.FullLoader)
 
 data = []
-problem = RelaxedExperiment(template='', name='relaxed', p='zero')
+problem = RelaxedExperiment(template='', name='relaxed', p='zero', parameters = parameters)
 problem.counter = 0
 
 # from problem import PlateProblemSNES

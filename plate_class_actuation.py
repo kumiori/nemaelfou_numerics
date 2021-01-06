@@ -11,9 +11,9 @@ import pandas as pd
 
 class Actuation(Experiment):
 	"""docstring for Actuation"""
-	def __init__(self, bc_no = 0, template='', name=''):
-		self.bc_no = bc_no
-		super(Actuation, self).__init__(template, '{}-{}'.format(name, bc_no))
+	# def __init__(self, template='', name=''):
+		# self.bc_no = bc_no
+		# super(Actuation, self).__init__(template, '{}'.format(name))
 
 	def add_userargs(self):
 		self.parser.add_argument("--rad", type=float, default=1.)
@@ -30,7 +30,10 @@ class Actuation(Experiment):
 			"geometry": {
 				"meshsize": args.h,
 				"rad": args.rad
-			}
+			},
+			"load": {
+				"f0": args.f0
+				}
 		}
 		print('Parameters:')
 		print(parameters)
@@ -39,24 +42,24 @@ class Actuation(Experiment):
 	def create_mesh(self, parameters):
 		from dolfin import Point, XDMFFile
 
-		d={'rad': parameters['geometry']['rad'],
-			'meshsize': parameters['geometry']['meshsize']}
-		fname = 'circle'
-		meshfile = "meshes/%s-%s.xml"%(fname, self.signature)
+		# d={'rad': parameters['geometry']['rad'],
+		# 	'meshsize': parameters['geometry']['meshsize']}
+		# fname = 'circle'
+		# meshfile = "meshes/%s-%s.xml"%(fname, self.signature)
 
-		if os.path.isfile(meshfile):
-			# already existing mesh
-			print("Meshfile %s exists"%meshfile)
+		# if os.path.isfile(meshfile):
+		# 	# already existing mesh
+		# 	print("Meshfile %s exists"%meshfile)
 
-		else:
-			# mesh_template = open('scripts/sandwich_pert.template.geo' )
-			print("Create meshfile, meshsize {}".format(parameters['geometry']['meshsize']))
-			nel = int(parameters['geometry']['rad']/parameters['geometry']['meshsize'])
-			geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
-			mesh = mshr.generate_mesh(geom, nel)
+		# else:
+		# 	# mesh_template = open('scripts/sandwich_pert.template.geo' )
+		# 	print("Create meshfile, meshsize {}".format(parameters['geometry']['meshsize']))
+		# 	nel = int(parameters['geometry']['rad']/parameters['geometry']['meshsize'])
+		# 	geom = mshr.Circle(Point(0., 0.), parameters['geometry']['rad'])
+		# 	mesh = mshr.generate_mesh(geom, nel)
 
-			mesh_xdmf = XDMFFile("meshes/%s-%s.xdmf"%(fname, self.signature))
-			mesh_xdmf.write(mesh)
+		# 	mesh_xdmf = XDMFFile("meshes/%s-%s.xdmf"%(fname, self.signature))
+		# 	mesh_xdmf.write(mesh)
 
 		form_compiler_parameters = {
 			"representation": "uflacs",
@@ -64,6 +67,13 @@ class Actuation(Experiment):
 			"optimize": True,
 			"cpp_optimize": True,
 		}
+
+
+		nel = int(parameters['geometry']['rad']/parameters['geometry']['meshsize'])
+
+		geom = mshr.Rectangle(Point(-parameters['geometry']['rad']/2, -parameters['geometry']['rad']/2),
+								Point(parameters['geometry']['rad']/2, parameters['geometry']['rad']/2))
+		mesh = mshr.generate_mesh(geom, nel)
 
 		self.ds = Measure("exterior_facet", domain = mesh)
 		self.dS = Measure("interior_facet", domain = mesh)
@@ -102,7 +112,11 @@ class Actuation(Experiment):
 		bc_horiz = [DirichletBC(V.sub(1), Constant([0., 0.]), 'on_boundary')]
 
 		bcs = [bc_clamped, bc_free, bc_vert, bc_horiz]
-		return bcs[self.bc_no]
+		# return bcs[self.bc_no]
+		# return bc_horiz
+		# return bc_clamped
+		return bc_vert
+		# return bc_free
 
 	def postprocess(self):
 		print('z norm: ', self.z.vector().norm('l2'))
@@ -125,16 +139,16 @@ class Actuation(Experiment):
 
 		self.file_mesh << self.mesh
 
-		self.file_out.write(u, 3.)
-		self.file_out.write(v, 3.)
-		self.file_out.write(M, 3.)
-		self.file_out.write(self.Q0, 3.)
-
-		self.file_pproc.write_checkpoint(u, 'u', self.bc_no, append = True)
-		self.file_pproc.write_checkpoint(v, 'v', self.bc_no, append = True)
+		self.file_out.write(u, 0)
+		self.file_out.write(v, 0)
+		self.file_out.write(M, 0)
+		self.file_out.write(self.Q0, 0)
+		
+		self.file_pproc.write_checkpoint(u, 'u', 0, append = True)
+		self.file_pproc.write_checkpoint(v, 'v', 0, append = True)
 		# self.file_pproc.write_checkpoint(M, 'M', 0, append = True)
 		# self.file_pproc.write_checkpoint(Q, 'Q', 0, append, True)
-		print('DEBUG: saving ts {}'.format(self.bc_no))
+		print('DEBUG: saving ts {}'.format(0))
 
 		energies = {'energy_nem': _energy_nem, 'energy_ben': _energy_ben, 'energy_mem': _energy_mem, 'work': _work}
 
@@ -144,18 +158,22 @@ class Actuation(Experiment):
 		# import pdb; pdb.set_trace()
 		pass
 
-bcs = ['bc_clamped', 'bc_free', 'bc_vert', 'bc_horiz']
-energies = []
+# bcs = ['bc_clamped', 'bc_free', 'bc_vert', 'bc_horiz']
+# energies = []
 
-for bc_no in range(len(bcs)):
-	print(bcs[bc_no])
-	problem = Actuation(bc_no = bc_no, template='', name='disclination')
+problem = Actuation(template='', name='disclination')
+problem.solve()
+ener_bcs = problem.postprocess()
 
-	problem.solve()
-	ener_bcs = problem.postprocess()
-	energies.append(ener_bcs)
+# for bc_no in range(len(bcs)):
+# 	print(bcs[bc_no])
+# 	problem = Actuation(bc_no = bc_no, template='', name='disclination')
 
-energies_pd = pd.DataFrame(energies)
-energies_pd.to_json(os.path.join(problem.outdir, "energy_data.json"))
+# 	problem.solve()
+# 	ener_bcs = problem.postprocess()
+# 	energies.append(ener_bcs)
+
+# energies_pd = pd.DataFrame(energies)
+# energies_pd.to_json(os.path.join(problem.outdir, "energy_data.json"))
 
 
