@@ -71,7 +71,7 @@ with open('parameters/slab.yaml') as f:
     parameters = yaml.load(f, Loader=yaml.FullLoader)
 
 signature = hashlib.md5(str(parameters).encode('utf-8')).hexdigest()
-outdir = 'output/relax-affine-{}'.format(signature)
+outdir = 'output/relax-affine-{}-{}'.format(parameters['material']['p'], signature)
 
 Path(outdir).mkdir(parents=True, exist_ok=True)
 log(LogLevel.INFO, 'Outdir: {}'.format(outdir))
@@ -110,13 +110,13 @@ def set_solver(parameters = {}):
     #         }
     #         }
 
-    log(LogLevel.INFO, "---- Setting additional slepc options for eigen solver -----")
     prefix = ''
+    log(LogLevel.INFO, "---- Setting additional slepc options for eigen solver -----")
     for (parameter, value) in parameters['solver'].items():
         if value is not None:
-            log(LogLevel.INFO, "DEBUG: setting {} {}".format(prefix + parameter, value))
+            log(LogLevel.DEBUG, "DEBUG: setting {} {}".format(prefix + parameter, value))
             dolfin.PETScOptions.set(prefix + parameter, value)
-    log(LogLevel.INFO, "------------------------------------------------------------")
+    log(LogLevel.DEBUG, "------------------------------------------------------------")
     snes.setFromOptions()
     # info(solver.parameters, True)
     # import pdb; pdb.set_trace()
@@ -211,7 +211,7 @@ bc_flex = [DirichletBC(V2.sub(0), Constant([[1., 0], [0., 0.]]),
     ]
 
 
-hate = np.matrix([[1, 0], [1, 1]])
+hate = np.matrix([[1, 0], [0, 1]])
 g = Expression(['x[0]*e11 + x[1]*e12', 
                 'x[0]*e21 + x[1]*e22'], e11=hate.tolist()[0][0], 
                                         e12=hate.tolist()[0][1], 
@@ -310,6 +310,7 @@ def phase(u, v):
 
 
 if parameters['material']['p']=='zero':
+    log(LogLevel.INFO, 'material regime p={}'.format(parameters['material']['p']))
 
     def G(U):
         u = U[0]
@@ -382,80 +383,58 @@ if parameters['material']['p']=='zero':
         return eff_density_uv*dx
 
 elif parameters['material']['p']=='neg':
+    log(LogLevel.INFO, 'material regime p={}'.format(parameters['material']['p']))
 
     def G(U):
-        # u = U[0]
         v = U[1]
-        # em = emin(u, v)
-        # eM = emax(u, v)
-        martEnergy = 1/2*2./3.*pow((v-1.), 2.)
-        stiffEnergy = 1/2*2./3.*pow((v+1./2.), 2.)
+        stiffEnergy = 1/2*2./3.*pow((v-1.), 2.)
+        martEnergy= 1/2*2./3.*pow((v+1./2.), 2.)
 
         # isLiquid = And(And(gt(em, -1/3), lt(eM,-2.*em)), gt(eM, - em/2.))
         isLiquid = And(gt(v, -1/2), lt(v,1.))
-        isMartensite = gt(v, 1.)
+        isElastic = gt(v, 1.)
+        isMartensite = lt(v, -1./2.)
         isSolid = conditional(isMartensite, martEnergy, stiffEnergy)
 
         eff_density = conditional(isLiquid, 0., isSolid)
         return eff_density*dx
 
     def DG_uv( U, V):
-        u = U[0]
         v = U[1]
-        u_ = V[0]
         v_ = V[1]
-        em = emin(u, v)
-        eM = emax(u, v)
-        abs_u = pow((pow(u[0],2)+pow(u[1],2)),1/2)
+        # em = emin(u, v)
+        # eM = emax(u, v)
+        stiffEnergy = 2./3.*(v-1.)*v_
+        martEnergy= 2./3.*(v+1./2.)*v_
 
-        martEnergy_u = 3./2.*(em - 1./3.)*2*(-1./2.)*inner(u, u_)/abs_u
-        stiffEnergy_u = 3./2.*(em - 1./3.)*2*(-1./2.)*inner(u, u_)/abs_u \
-                            + (em + 2.*eM-1)*inner(u, u_)/abs_u
+        # isLiquid = And(And(gt(em, -1/3), lt(eM,-2.*em)), gt(eM, - em/2.))
+        isLiquid = And(gt(v, -1/2), lt(v,1.))
+        isElastic = gt(v, 1.)
+        isMartensite = lt(v, -1./2.)
+        isSolid = conditional(isMartensite, martEnergy, stiffEnergy)
 
-        martEnergy_v = 3./2.*(em - 1./3.)*2*1./3.*v_
-        stiffEnergy_v = 3./2.*(em - 1./3.)*2*1./3.*v_ \
-                            + (em + 2.*eM-1)*v_
-
-        isLiquid     = And(And(gt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2))
-        isMartensite = And(And(lt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2+1/2))
-
-        isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)),
-            stiffEnergy_u + stiffEnergy_v, 0)
-        isSolid = conditional(isMartensite, martEnergy_u + martEnergy_v, isStiff)
-        eff_density_uv = conditional(isLiquid, 0., isSolid)
-
-        return eff_density_uv*dx
+        eff_density = conditional(isLiquid, 0., isSolid)
+        return eff_density*dx
 
     def DDG_uv( U, V, dV):
-        u = U[0]
         v = U[1]
-        u_ = V[0]
         v_ = V[1]
-        du = dV[0]
         dv = dV[1]
-        em = emin(u, v)
-        eM = emax(u, v)
-        abs_u = pow((pow(u[0],2)+pow(u[1],2)),1/2)
+        stiffEnergy = 2./3.*dv*v_
+        martEnergy= 2./3.*dv*v_
 
-        martEnergy_uu = -3./2.*(1./3.*v/abs_u - 1./2.)*inner(u_, du)
-        stiffEnergy_uu = -3./2.*(1./3.*v/abs_u - 1./2.)*inner(u_, du) \
-                            + 1./2.*((v/abs_u + 1./2.))*inner(du, u_)
+        # isLiquid = And(And(gt(em, -1/3), lt(eM,-2.*em)), gt(eM, - em/2.))
+        isLiquid = And(gt(v, -1/2), lt(v,1.))
+        isElastic = gt(v, 1.)
+        isMartensite = lt(v, -1./2.)
+        isSolid = conditional(isMartensite, martEnergy, stiffEnergy)
 
-        martEnergy_vv = 1./3.*dv*v_
-        stiffEnergy_vv = 1./3.*dv*v_ + dv*v_
-
-        isLiquid     = And(And(gt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2))
-        isMartensite = And(And(lt(em, -1/3), lt(eM,-2*em)), gt(eM, - em/2+1/2))
-
-        isStiff = conditional(And(And(lt(em, -1/3), gt(eM,-em/2.)), lt(eM, - em/2+1/2)),
-            stiffEnergy_uu + stiffEnergy_vv, 0)
-        isSolid = conditional(isMartensite, martEnergy_uu + martEnergy_vv, isStiff)
-        eff_density_uv = conditional(isLiquid, 0., isSolid)
-
-        return eff_density_uv*dx
+        eff_density = conditional(isLiquid, 0., isSolid)
+        return eff_density*dx
 
 else:
     log(LogLevel.CRITICAL, 'Not implemented')
+    sys.exit()
 
 def postprocess(z, t, it=0):
     M, u, v = z.split(True)
@@ -518,6 +497,8 @@ def postprocess(z, t, it=0):
     plt.ylabel('$e_{max}$')
     plt.savefig(os.path.join(outdir, 'diagram-{}.pdf'.format(counter)))
 
+    # import pdb; pdb.set_trace()
+
     fou_energy = assemble(1./2.*G([u, v])+1./2.*Clambdamu*v*v*dx)
     mem_energy = assemble(1./2.*a_m(u, u)-3./4.*inner(eps(u), M)*dx)
     ben_energy = assemble(1./2.*a(M, M)-3./4.*inner(eps(u), M)*dx)
@@ -576,6 +557,7 @@ jacobian = - a_m(du, u_) + a(dM, M_)        \
             - 1./2.*DDG_uv([u, v], [u_, v_], [du, dv])  \
 
 
+
 # without foundation
 
 # lagrangian = 1./2.*(a(M, M) - 3.*inner(M, eps(u))*dx - a_m(u, u))             \
@@ -615,10 +597,18 @@ log(LogLevel.INFO, 'DEBUG: converged reason: {}'.format(conv))
 log(LogLevel.INFO, 'J linf: {:.5f}'.format(J.norm('linf')))
 log(LogLevel.INFO, 'F   l2: {:.5f}'.format(F.norm('l2')))
 data = postprocess(z, t=0, it=0)
-
+# log(LogLevel.INFO, '{}'.format(data))
 # bc_aff_mem
+import pandas as pd
+# import pdb; pdb.set_trace()
 
-import pdb; pdb.set_trace()
+dataf = pd.DataFrame(data, index=[0])
+log(LogLevel.INFO,'{}'.format(dataf))
+dataf.to_json(os.path.join(outdir, "data.json"))
+
+
+sys.exit()
+
 
 
 
